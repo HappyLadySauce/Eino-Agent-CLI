@@ -1,52 +1,34 @@
 package agents
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
 
+var errAgentExit = errors.New("agent exit requested")
+
+// RunAgentLoop starts the interactive agent CLI loop.
+// RunAgentLoop 启动交互式 Agent CLI 循环。
 func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 	if ctx == nil {
-		ctx = context.Background()
-	}
-	if cfg == nil || cfg.Model == nil {
-		return errors.New("agent config is missing model settings")
+		return errors.New("context is required")
 	}
 
-	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		APIKey:  cfg.Model.AuthToken,
-		BaseURL: cfg.Model.BaseURL,
-		Model:   cfg.Model.Model,
-	})
+	runtime, err := NewAgentRuntime(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("create chat model: %w", err)
+		return fmt.Errorf("create agent runtime: %w", err)
 	}
 
-	chatAgent, err := NewChatAgent(ctx, model)
-	if err != nil {
-		return fmt.Errorf("create chat agent: %w", err)
-	}
-
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent:           chatAgent.agentChatModel,
-		EnableStreaming: true,
-	})
-
-	msgs := messages.NewMessages(cfg.Model.MaxOutputTokens)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer
-	prompts := scanPrompts(ctx, scanner)
+	history := messages.NewMessages(runtime.MaxHistoryMessages())
+	prompts := scanPrompts(ctx, os.Stdin)
 
 	for {
 		fmt.Print("User> ")
@@ -55,71 +37,113 @@ func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 			return nil
 		}
 		if promptResult.err != nil {
+			if errors.Is(promptResult.err, context.Canceled) || errors.Is(promptResult.err, context.DeadlineExceeded) {
+				fmt.Fprintln(os.Stderr, "Agent loop stopped by context cancellation.")
+				return nil
+			}
 			return fmt.Errorf("read user input: %w", promptResult.err)
 		}
 
-		prompt := strings.TrimSpace(promptResult.text)
-		if prompt == "" {
+		command, err := ParseAgentCommand(promptResult.text)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Command error: %v\n", err)
 			continue
 		}
-		if prompt == "quit" || prompt == "exit" {
-			break
-		}
-
-		msgs.Add(schema.UserMessage(prompt))
-		iter := runner.Run(ctx, msgs.Get())
-		fmt.Print("Assistant> ")
-
-		result, err := messages.ConsumeAssistantStream(iter, os.Stdout)
-		if err != nil {
-			return fmt.Errorf("consume assistant stream: %w", err)
-		}
-		fmt.Println()
-
-		if result.Content != "" {
-			msgs.Add(schema.AssistantMessage(result.Content, nil))
+		if err := dispatchCommand(ctx, runtime, history, command); err != nil {
+			if errors.Is(err, errAgentExit) {
+				return nil
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				fmt.Fprintln(os.Stderr, "Agent command stopped by context cancellation.")
+				return nil
+			}
+			fmt.Fprintf(os.Stderr, "Agent error: %v\n", err)
 		}
 	}
+}
 
+func dispatchCommand(ctx context.Context, runtime *AgentRuntime, history *messages.Messages, command AgentCommand) error {
+	switch command.Kind {
+	case AgentCommandChat:
+		return runChatCommand(ctx, runtime, history, command.Prompt)
+	case AgentCommandExit:
+		return errAgentExit
+	case AgentCommandList:
+		printAgentDefinitions(runtime.Definitions())
+		return nil
+	case AgentCommandRun:
+		return runSubAgentCommand(ctx, runtime, command.AgentName, command.Prompt)
+	case AgentCommandParallel:
+		return runParallelCommand(ctx, runtime, command.AgentName, command.Tasks)
+	default:
+		return fmt.Errorf("unsupported command kind %d", command.Kind)
+	}
+}
+
+func runChatCommand(ctx context.Context, runtime *AgentRuntime, history *messages.Messages, prompt string) error {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil
+	}
+
+	if err := history.Add(schema.UserMessage(prompt)); err != nil {
+		return fmt.Errorf("append user message: %w", err)
+	}
+
+	fmt.Print("Assistant> ")
+	result, err := runtime.RunMain(ctx, history.Get(), os.Stdout)
+	if err != nil {
+		return err
+	}
+	fmt.Println()
+
+	if result.Content != "" {
+		if err := history.Add(schema.AssistantMessage(result.Content, nil)); err != nil {
+			return fmt.Errorf("append assistant message: %w", err)
+		}
+	}
 	return nil
 }
 
-type promptResult struct {
-	text string
-	err  error
+func runSubAgentCommand(ctx context.Context, runtime *AgentRuntime, agentName, prompt string) error {
+	fmt.Printf("Assistant[%s]> ", agentName)
+	_, err := runtime.RunSync(ctx, agentName, prompt, os.Stdout)
+	fmt.Println()
+	return err
 }
 
-// scanPrompts reads stdin on a worker goroutine so the main loop can react to context cancellation.
-// scanPrompts 在工作 goroutine 中读取 stdin，使主循环可以响应 context 取消。
-func scanPrompts(ctx context.Context, scanner *bufio.Scanner) <-chan promptResult {
-	prompts := make(chan promptResult)
-	go func() {
-		defer close(prompts)
+func runParallelCommand(ctx context.Context, runtime *AgentRuntime, agentName string, prompts []string) error {
+	tasks := NewWorkerTasks(agentName, prompts)
+	results, err := RunParallelWorkers(ctx, runtime, tasks, ParallelOptions{
+		MaxConcurrency: runtime.MaxParallelWorkers(),
+	})
+	if err != nil {
+		return err
+	}
 
-		for scanner.Scan() {
-			select {
-			case prompts <- promptResult{text: scanner.Text()}:
-			case <-ctx.Done():
-				return
-			}
+	fmt.Printf("Parallel[%s]> %d task(s)\n", agentName, len(results))
+	for _, result := range results {
+		status := "ok"
+		if result.Err != nil {
+			status = "error"
 		}
-		if err := scanner.Err(); err != nil {
-			select {
-			case prompts <- promptResult{err: err}:
-			case <-ctx.Done():
-			}
+		fmt.Printf("\n[%d] %s duration=%s\n", result.ID, status, result.Duration.Round(0))
+		if result.Err != nil {
+			fmt.Printf("Error: %v\n", result.Err)
+			continue
 		}
-	}()
-	return prompts
+		fmt.Println(strings.TrimSpace(result.Content))
+	}
+	return nil
 }
 
-// receivePrompt waits for either the next prompt or context cancellation.
-// receivePrompt 等待下一条用户输入或 context 取消。
-func receivePrompt(ctx context.Context, prompts <-chan promptResult) (promptResult, bool) {
-	select {
-	case <-ctx.Done():
-		return promptResult{err: fmt.Errorf("agent loop canceled: %w", ctx.Err())}, true
-	case prompt, ok := <-prompts:
-		return prompt, ok
+func printAgentDefinitions(definitions []AgentDefinition) {
+	fmt.Println("Agents:")
+	for _, definition := range definitions {
+		parallel := "no"
+		if definition.CanRunInParallel {
+			parallel = "yes"
+		}
+		fmt.Printf("- %s [%s, parallel=%s]: %s\n", definition.Name, definition.PermissionMode, parallel, definition.Description)
 	}
 }

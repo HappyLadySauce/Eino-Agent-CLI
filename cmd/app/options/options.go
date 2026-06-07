@@ -13,6 +13,7 @@ type Options struct {
 	basename   string
 	configPath string
 	Model      *options.ModelOptions `mapstructure:"model"`
+	Agent      *options.AgentOptions `mapstructure:"agent"`
 }
 
 // ConfigPath returns the absolute path of the loaded configuration file.
@@ -30,7 +31,8 @@ func (o *Options) SetConfigPath(path string) {
 func NewOptions(basename string) *Options {
 	return &Options{
 		basename: basename,
-		Model: options.NewModelOptions(),
+		Model:    options.NewModelOptions(),
+		Agent:    options.NewAgentOptions(),
 	}
 }
 
@@ -48,6 +50,11 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) *flag.NamedFlagSets {
 	// 将模型标志注册到模型标志集中。
 	modelFS := nfs.FlagSet("Model")
 	o.Model.AddFlags(modelFS)
+
+	// Register agent orchestration flags into the agent flag set.
+	// 将 Agent 编排标志注册到 Agent 标志集中。
+	agentFS := nfs.FlagSet("Agent")
+	o.Agent.AddFlags(agentFS)
 
 	// Merge all named flag sets into the root command FlagSet.
 	// 将所有命名标志集合并到根命令的 FlagSet。
