@@ -27,11 +27,11 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 			// Bind command-line flags to Viper (CLI values override the config file).
 			// 将命令行标志绑定到 Viper（命令行参数覆盖配置文件）。
 			if err := viper.BindPFlags(cmd.Flags()); err != nil {
-				return err
+				return fmt.Errorf("bind command flags: %w", err)
 			}
 
 			if err := viper.Unmarshal(opts); err != nil {
-				return err
+				return fmt.Errorf("unmarshal options: %w", err)
 			}
 
 			// Keep the loaded config file path for user-facing validation errors.
@@ -48,11 +48,12 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 			if err := opts.Validate(); err != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "Configuration file: %s\n", opts.ConfigPath())
 				_, _ = fmt.Fprintf(os.Stderr, "%s\n", err)
-				return fmt.Errorf("configuration incomplete")
+				return fmt.Errorf("configuration incomplete: %w", err)
 			}
-			return run(ctx, opts)
+			return run(cmd.Context(), opts)
 		},
 	}
+	cmd.SetContext(ctx)
 
 	nfs := opts.AddFlags(cmd.Flags())
 	flag.SetUsageAndHelpFunc(cmd, *nfs, 80)
@@ -68,7 +69,7 @@ func run(ctx context.Context, opts *options.Options) error {
 
 	err := agents.RunAgentLoop(ctx, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("run agent loop: %w", err)
 	}
 
 	return nil

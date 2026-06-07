@@ -7,7 +7,6 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-	"k8s.io/klog/v2"
 )
 
 const DefaultMaxCount = 20
@@ -144,8 +143,7 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 			continue
 		}
 		if event.Err != nil {
-			klog.Errorf("assistant stream event failed: %v", event.Err)
-			return result, event.Err
+			return result, fmt.Errorf("assistant stream event failed: %w", event.Err)
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
@@ -160,15 +158,13 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 			chunkCount, err := consumeMessageStream(messageOutput.MessageStream, writer, &reply)
 			result.ChunkCount += chunkCount
 			if err != nil {
-				klog.Errorf("assistant message stream failed: %v", err)
-				return result, err
+				return result, fmt.Errorf("assistant message stream failed: %w", err)
 			}
 			continue
 		}
 
 		if err := consumeMessageEvent(event, writer, &reply); err != nil {
-			klog.Errorf("assistant message event failed: %v", err)
-			return result, err
+			return result, fmt.Errorf("assistant message event failed: %w", err)
 		}
 	}
 
