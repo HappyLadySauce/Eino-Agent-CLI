@@ -67,7 +67,7 @@ func loadViperConfig(basename, cfgFilePath string) error {
 	if cfgFilePath != "" {
 		resolved, err := resolveConfigPath(cfgFilePath)
 		if err != nil {
-			return fmt.Errorf("cannot resolve config path %q: %w", cfgFilePath, err)
+			return fmt.Errorf("cannot resolve config path %q: %v", cfgFilePath, err)
 		}
 		return readConfigFile(resolved)
 	}
@@ -99,7 +99,7 @@ func userConfigDir(basename string) string {
 func findDefaultConfigFile(basename string) (string, bool, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", false, fmt.Errorf("cannot get working directory: %w", err)
+		return "", false, fmt.Errorf("cannot get working directory: %v", err)
 	}
 
 	searchDirs := []string{cwd, userConfigDir(basename)}
@@ -144,7 +144,7 @@ func readConfigFile(path string) error {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("config file not found: %s", path)
 		}
-		return fmt.Errorf("cannot read config file %s: %w", path, err)
+		return fmt.Errorf("cannot read config file %s: %v", path, err)
 	}
 
 	// Support ${ENV_VAR} expansion inside config files so values can be injected via the environment (e.g. from Make).
@@ -155,7 +155,7 @@ func readConfigFile(path string) error {
 		viper.SetConfigType(ext)
 	}
 	if err := viper.ReadConfig(strings.NewReader(expanded)); err != nil {
-		return fmt.Errorf("invalid config file %s: %w", path, err)
+		return fmt.Errorf("invalid config file %s: %v", path, err)
 	}
 	loadedConfigPath = path
 	return nil
