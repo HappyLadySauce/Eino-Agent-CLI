@@ -10,7 +10,8 @@ import (
 	"k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
 
-	"github.com/HappyLadySauce/Eino-Agent-CLI/cmd/app/agents"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/agents"
+
 	"github.com/HappyLadySauce/Eino-Agent-CLI/cmd/app/options"
 	pkgoptions "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/options"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
@@ -63,7 +64,7 @@ func run(ctx context.Context, opts *options.Options) error {
 	cfg := &config.Config{}
 	config.Init(cfg)
 
-	err := agents.RunAgentLoop(ctx, opts)
+	err := agents.RunAgentLoop(ctx, cfg)
 	if err != nil {
 		return err
 	}
