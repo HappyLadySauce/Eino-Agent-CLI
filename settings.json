@@ -1,0 +1,8 @@
+{
+    "model": {
+        "EINO_AUTH_TOKEN": "${EINO_AUTH_TOKEN}",
+        "EINO_BASE_URL": "${EINO_BASE_URL}",
+        "EINO_MODEL": "${EINO_MODEL}",
+        "EINO_MAX_OUTPUT_TOKENS": 32000
+    }
+}
