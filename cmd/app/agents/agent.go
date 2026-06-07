@@ -1,9 +1,10 @@
 package agents
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -36,24 +37,23 @@ func RunAgentLoop(ctx context.Context, opts *options.Options) error {
 		return err
 	}
 
-	agentLoop, err := adk.NewLoopAgent(ctx, &adk.LoopAgentConfig{
-		Name: "agent-loop",
-		Description: "this is a loop agent",
-		SubAgents: []adk.Agent{agentChatModel},
-	})
-	if err != nil {
-		klog.Errorf("failed to create loop agent: %v", err)
-		return err
-	}
-
+	// Use ChatModelAgent directly for CLI chat; LoopAgent re-invokes sub-agents until
+	// MaxIterations or BreakLoop, and MaxIterations=0 means infinite API calls.
+	// CLI 对话直接使用 ChatModelAgent；LoopAgent 会反复调用子 Agent，
+	// 且 MaxIterations=0 表示无限循环调用 API。
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent: agentLoop,
+		Agent:           agentChatModel,
+		EnableStreaming: true,
 	})
 
 	var messages []*schema.Message
 	scanner := bufio.NewScanner(os.Stdin)
 
-	for scanner.Scan() {
+	for {
+		fmt.Print("User> ")
+		if !scanner.Scan() {
+			break
+		}
 		prompt := strings.TrimSpace(scanner.Text())
 		if prompt == "quit" {
 			break
@@ -61,20 +61,69 @@ func RunAgentLoop(ctx context.Context, opts *options.Options) error {
 
 		messages = append(messages, schema.UserMessage(prompt))
 		iter := runner.Run(ctx, messages)
+		fmt.Print("Assistant> ")
+
+		var reply strings.Builder
 		for {
 			event, ok := iter.Next()
 			if !ok {
 				break
 			}
 			if event.Err != nil {
-				klog.Errorf("failed to run agent: %v", event.Err)
+				return event.Err
+			}
+			if event.Output == nil || event.Output.MessageOutput == nil {
 				continue
 			}
-			if event.Output != nil && event.Output.MessageOutput != nil {
-				fmt.Println(event.Output.MessageOutput.Message.Content)
+			mo := event.Output.MessageOutput
+			if mo.Role != schema.Assistant {
+				continue
 			}
+
+			if mo.IsStreaming && mo.MessageStream != nil {
+				if err := streamAssistantReply(mo.MessageStream, &reply); err != nil {
+					return err
+				}
+				continue
+			}
+
+			msg, _, err := adk.GetMessage(event)
+			if err != nil {
+				return err
+			}
+			if msg.Content == "" {
+				continue
+			}
+
+			fmt.Print(msg.Content)
+			reply.WriteString(msg.Content)
+		}
+		fmt.Println()
+
+		if reply.Len() > 0 {
+			messages = append(messages, schema.AssistantMessage(reply.String(), nil))
 		}
 	}
 	
 	return nil
+}
+
+// streamAssistantReply prints assistant tokens as they arrive and accumulates the full reply.
+// streamAssistantReply 流式打印 assistant 输出，并累积完整回复用于多轮上下文。
+func streamAssistantReply(stream *schema.StreamReader[*schema.Message], reply *strings.Builder) error {
+	defer stream.Close()
+	for {
+		chunk, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		if chunk == nil || chunk.Content == "" {
+			continue
+		}
+		fmt.Print(chunk.Content)
+		reply.WriteString(chunk.Content)
+	}
 }
