@@ -10,7 +10,6 @@ import (
 // Config 汇总各包共用的运行时配置。
 type Config struct {
 	Model *options.ModelOptions `mapstructure:"model"`
-	Agent *options.AgentOptions `mapstructure:"agent"`
 }
 
 var (

@@ -22,4 +22,12 @@ func TestAgentRegistry(t *testing.T) {
 	if err := registry.Register(definitions[0]); err == nil {
 		t.Fatalf("Register(duplicate) error = nil, want non-nil")
 	}
+	if err := registry.Register(AgentDefinition{
+		Name:           "BadName",
+		Description:    "bad",
+		SystemPrompt:   "bad",
+		PermissionMode: PermissionModeReadonly,
+	}); err == nil {
+		t.Fatalf("Register(invalid name) error = nil, want non-nil")
+	}
 }

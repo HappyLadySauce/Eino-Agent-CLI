@@ -20,38 +20,43 @@ func TestParseAgentCommand(t *testing.T) {
 			want:  AgentCommand{Kind: AgentCommandExit},
 		},
 		{
-			name:  "list",
+			name:  "agents mode",
 			input: "/agents",
-			want:  AgentCommand{Kind: AgentCommandList},
+			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAgents},
 		},
 		{
-			name:  "plan",
-			input: "/plan 做一个方案",
-			want:  AgentCommand{Kind: AgentCommandRun, AgentName: AgentPlan, Prompt: "做一个方案"},
+			name:  "plan mode",
+			input: "/plan",
+			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModePlan},
 		},
 		{
-			name:  "agent",
-			input: "/agent explore 分析代码",
-			want:  AgentCommand{Kind: AgentCommandRun, AgentName: AgentExplore, Prompt: "分析代码"},
+			name:  "ask mode",
+			input: "/ask",
+			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAsk},
 		},
 		{
-			name:  "parallel",
-			input: "/parallel verify 检查错误 || 检查并发",
-			want:  AgentCommand{Kind: AgentCommandParallel, AgentName: AgentVerify, Tasks: []string{"检查错误", "检查并发"}},
+			name:  "subagent",
+			input: "/subagent 检查错误传递",
+			want:  AgentCommand{Kind: AgentCommandSubAgent, Prompt: "检查错误传递"},
+		},
+		{
+			name:    "old agent command removed",
+			input:   "/agent explore 分析代码",
+			wantErr: true,
+		},
+		{
+			name:    "old parallel command removed",
+			input:   "/parallel verify 检查错误 || 检查并发",
+			wantErr: true,
+		},
+		{
+			name:    "empty subagent",
+			input:   "/subagent ",
+			wantErr: true,
 		},
 		{
 			name:    "unknown",
 			input:   "/bad command",
-			wantErr: true,
-		},
-		{
-			name:    "empty plan",
-			input:   "/plan ",
-			wantErr: true,
-		},
-		{
-			name:    "empty parallel task",
-			input:   "/parallel explore ||",
 			wantErr: true,
 		},
 	}
@@ -68,17 +73,25 @@ func TestParseAgentCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseAgentCommand() error = %v", err)
 			}
-			if got.Kind != tt.want.Kind || got.AgentName != tt.want.AgentName || got.Prompt != tt.want.Prompt {
+			if got != tt.want {
 				t.Fatalf("ParseAgentCommand() = %+v, want %+v", got, tt.want)
 			}
-			if len(got.Tasks) != len(tt.want.Tasks) {
-				t.Fatalf("ParseAgentCommand() tasks = %+v, want %+v", got.Tasks, tt.want.Tasks)
-			}
-			for i := range got.Tasks {
-				if got.Tasks[i] != tt.want.Tasks[i] {
-					t.Fatalf("ParseAgentCommand() tasks = %+v, want %+v", got.Tasks, tt.want.Tasks)
-				}
-			}
 		})
+	}
+}
+
+func TestModeState(t *testing.T) {
+	state := NewModeState()
+	if got := state.Current(); got != SessionModeAgents {
+		t.Fatalf("Current() = %q, want %q", got, SessionModeAgents)
+	}
+	if err := state.Switch(SessionModePlan); err != nil {
+		t.Fatalf("Switch(plan) error = %v", err)
+	}
+	if got := state.Current(); got != SessionModePlan {
+		t.Fatalf("Current() = %q, want %q", got, SessionModePlan)
+	}
+	if err := state.Switch("bad"); err == nil {
+		t.Fatalf("Switch(bad) error = nil, want non-nil")
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
@@ -13,32 +16,31 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/prompts"
+	agenttools "github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
 
-// AgentRuntime owns ADK agents, runners, and orchestration settings.
-// AgentRuntime 持有 ADK Agent、Runner 与编排设置。
+// AgentRuntime owns ADK agents, runners, tools, and orchestration settings.
+// AgentRuntime 持有 ADK Agent、Runner、工具与编排设置。
 type AgentRuntime struct {
+	mu sync.RWMutex
+
+	model              *openai.ChatModel
 	registry           *AgentRegistry
 	runners            map[string]*adk.Runner
+	mainRunners        map[SessionMode]*adk.Runner
 	maxHistoryMessages int
-	maxParallelWorkers int
 }
 
-// NewAgentRuntime creates the model, sub-agents, main agent, and runners.
-// NewAgentRuntime 创建模型、子 Agent、主 Agent 与 Runner。
+// NewAgentRuntime creates the model, built-in sub-agents, main agents, and runners.
+// NewAgentRuntime 创建模型、内置子 Agent、主 Agent 与 Runner。
 func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
 	if cfg == nil || cfg.Model == nil {
 		return nil, errors.New("agent config is missing model settings")
-	}
-	if cfg.Agent == nil {
-		return nil, errors.New("agent config is missing agent settings")
-	}
-	if cfg.Agent.MaxParallelWorkers < 1 {
-		return nil, fmt.Errorf("max_parallel_workers must be greater than or equal to 1, got %d", cfg.Agent.MaxParallelWorkers)
 	}
 
 	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
@@ -55,51 +57,32 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		return nil, fmt.Errorf("create agent registry: %w", err)
 	}
 
-	createdAgents := make(map[string]*adk.ChatModelAgent, len(registry.List()))
+	runtime := &AgentRuntime{
+		model:              model,
+		registry:           registry,
+		runners:            make(map[string]*adk.Runner),
+		mainRunners:        make(map[SessionMode]*adk.Runner),
+		maxHistoryMessages: cfg.Model.MaxOutputTokens,
+	}
+
 	for _, definition := range registry.List() {
 		if definition.Name == AgentGeneralPurpose {
 			continue
 		}
-		agent, err := newChatModelAgent(ctx, model, definition, nil)
+		if err := runtime.createRunnerLocked(ctx, definition); err != nil {
+			return nil, fmt.Errorf("create built-in sub-agent %q: %w", definition.Name, err)
+		}
+	}
+
+	for _, mode := range []SessionMode{SessionModeAgents, SessionModePlan, SessionModeAsk} {
+		runner, err := runtime.newMainRunner(ctx, mode)
 		if err != nil {
-			return nil, fmt.Errorf("create sub-agent %q: %w", definition.Name, err)
+			return nil, fmt.Errorf("create main agent for mode %q: %w", mode, err)
 		}
-		createdAgents[definition.Name] = agent
+		runtime.mainRunners[mode] = runner
 	}
 
-	tools := make([]tool.BaseTool, 0, len(createdAgents))
-	for _, name := range []string{AgentExplore, AgentPlan, AgentVerify} {
-		agent := createdAgents[name]
-		if agent == nil {
-			continue
-		}
-		tools = append(tools, adk.NewAgentTool(ctx, agent))
-	}
-
-	mainDefinition, err := registry.Get(AgentGeneralPurpose)
-	if err != nil {
-		return nil, err
-	}
-	mainAgent, err := newChatModelAgent(ctx, model, mainDefinition, tools)
-	if err != nil {
-		return nil, fmt.Errorf("create main agent: %w", err)
-	}
-	createdAgents[AgentGeneralPurpose] = mainAgent
-
-	runners := make(map[string]*adk.Runner, len(createdAgents))
-	for name, agent := range createdAgents {
-		runners[name] = adk.NewRunner(ctx, adk.RunnerConfig{
-			Agent:           agent,
-			EnableStreaming: true,
-		})
-	}
-
-	return &AgentRuntime{
-		registry:           registry,
-		runners:            runners,
-		maxHistoryMessages: cfg.Model.MaxOutputTokens,
-		maxParallelWorkers: cfg.Agent.MaxParallelWorkers,
-	}, nil
+	return runtime, nil
 }
 
 // Definitions returns all registered agent definitions.
@@ -108,6 +91,8 @@ func (r *AgentRuntime) Definitions() []AgentDefinition {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.registry.List()
 }
 
@@ -120,54 +105,204 @@ func (r *AgentRuntime) MaxHistoryMessages() int {
 	return r.maxHistoryMessages
 }
 
-// MaxParallelWorkers returns the configured worker concurrency limit.
-// MaxParallelWorkers 返回配置的 worker 并发上限。
-func (r *AgentRuntime) MaxParallelWorkers() int {
-	if r == nil || r.maxParallelWorkers <= 0 {
-		return 1
-	}
-	return r.maxParallelWorkers
-}
-
-// RunMain runs the main agent with shared conversation history.
-// RunMain 使用共享对话历史运行主 Agent。
-func (r *AgentRuntime) RunMain(ctx context.Context, history []*schema.Message, writer io.Writer) (*messages.AssistantStreamResult, error) {
-	return r.run(ctx, AgentGeneralPurpose, history, writer)
-}
-
-// RunSync runs one agent with isolated conversation history.
-// RunSync 使用隔离对话历史运行一个 Agent。
-func (r *AgentRuntime) RunSync(ctx context.Context, agentName, prompt string, writer io.Writer) (*messages.AssistantStreamResult, error) {
-	if prompt == "" {
-		return nil, errors.New("agent prompt is required")
-	}
-	result, err := r.run(ctx, agentName, []*schema.Message{schema.UserMessage(prompt)}, writer)
-	if err != nil {
-		return nil, fmt.Errorf("run sub-agent %q: %w", agentName, err)
-	}
-	return result, nil
-}
-
-func (r *AgentRuntime) run(ctx context.Context, agentName string, history []*schema.Message, writer io.Writer) (*messages.AssistantStreamResult, error) {
+// RunMain runs the main agent with shared conversation history in the selected mode.
+// RunMain 在指定模式下使用共享对话历史运行主 Agent。
+func (r *AgentRuntime) RunMain(ctx context.Context, mode SessionMode, history []*schema.Message, writer io.Writer) (*messages.AssistantStreamResult, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
 	if r == nil {
 		return nil, errors.New("agent runtime is nil")
 	}
-	if _, err := r.registry.Get(agentName); err != nil {
+	r.mu.RLock()
+	runner := r.mainRunners[mode]
+	r.mu.RUnlock()
+	if runner == nil {
+		return nil, fmt.Errorf("main agent runner for mode %q is not initialized", mode)
+	}
+	result, err := messages.ConsumeAssistantStream(runner.Run(ctx, history), writer)
+	if err != nil {
+		return nil, fmt.Errorf("consume assistant stream for mode %q: %w", mode, err)
+	}
+	return result, nil
+}
+
+// CreateAgent creates and registers a dynamic sub-agent.
+// CreateAgent 创建并注册动态子 Agent。
+func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input agenttools.CreateAgentInput) (*agenttools.CreateAgentOutput, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
+	if r == nil {
+		return nil, errors.New("agent runtime is nil")
+	}
+
+	sessionMode := SessionMode(mode)
+	permission := PermissionMode(strings.TrimSpace(input.PermissionMode))
+	if permission == "" {
+		if sessionMode == SessionModePlan {
+			permission = PermissionModePlan
+		} else {
+			permission = PermissionModeReadonly
+		}
+	}
+	if sessionMode == SessionModeAsk {
+		return nil, errors.New("ask mode cannot create sub-agents")
+	}
+	if sessionMode == SessionModePlan && !permission.IsSubAgentSafeInPlan() {
+		return nil, fmt.Errorf("plan mode cannot create agent with permission %q", permission)
+	}
+	if !isKnownPermissionMode(permission) {
+		return nil, fmt.Errorf("unsupported permission mode %q", permission)
+	}
+
+	definition := AgentDefinition{
+		Name:           normalizeAgentName(input.Name),
+		Description:    strings.TrimSpace(input.Description),
+		SystemPrompt:   strings.TrimSpace(input.Instruction),
+		PermissionMode: permission,
+		Dynamic:        true,
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := r.registry.Register(definition); err != nil {
+		return nil, fmt.Errorf("register dynamic agent: %w", err)
+	}
+	if err := r.createRunnerLocked(ctx, definition); err != nil {
+		return nil, fmt.Errorf("create dynamic agent runner: %w", err)
+	}
+
+	return &agenttools.CreateAgentOutput{
+		Name:           definition.Name,
+		Description:    definition.Description,
+		PermissionMode: string(definition.PermissionMode),
+		Created:        true,
+	}, nil
+}
+
+// RunSubAgent runs a sub-agent with a fresh isolated context and returns only the final result.
+// RunSubAgent 使用全新隔离上下文运行子 Agent，并仅返回最终结果。
+func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agenttools.RunSubAgentInput) (*agenttools.RunSubAgentOutput, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
+	if r == nil {
+		return nil, errors.New("agent runtime is nil")
+	}
+	task := strings.TrimSpace(input.Task)
+	if task == "" {
+		return nil, errors.New("sub-agent task is required")
+	}
+	sessionMode := SessionMode(mode)
+	if sessionMode == SessionModeAsk {
+		return nil, errors.New("ask mode cannot run sub-agents")
+	}
+
+	agentName := strings.TrimSpace(input.AgentName)
+	if agentName == "" {
+		if sessionMode == SessionModePlan {
+			agentName = AgentPlan
+		} else {
+			agentName = AgentExplore
+		}
+	}
+
+	r.mu.RLock()
+	definition, err := r.registry.Get(agentName)
+	runner := r.runners[agentName]
+	r.mu.RUnlock()
+	if err != nil {
 		return nil, err
 	}
-	runner := r.runners[agentName]
 	if runner == nil {
 		return nil, fmt.Errorf("agent runner %q is not initialized", agentName)
 	}
-	iter := runner.Run(ctx, history)
-	result, err := messages.ConsumeAssistantStream(iter, writer)
-	if err != nil {
-		return nil, fmt.Errorf("consume assistant stream for agent %q: %w", agentName, err)
+	if sessionMode == SessionModePlan && !definition.PermissionMode.IsSubAgentSafeInPlan() {
+		return nil, fmt.Errorf("plan mode cannot run agent %q with permission %q", agentName, definition.PermissionMode)
 	}
-	return result, nil
+
+	prompt := prompts.SubAgentPrompt(
+		strings.TrimSpace(input.Task),
+		strings.TrimSpace(input.ContextSummary),
+		strings.TrimSpace(input.ExpectedOutput),
+	)
+	start := time.Now()
+	result, err := messages.ConsumeAssistantStream(runner.Run(ctx, []*schema.Message{schema.UserMessage(prompt)}), io.Discard)
+	if err != nil {
+		return nil, fmt.Errorf("consume sub-agent %q result: %w", agentName, err)
+	}
+	return &agenttools.RunSubAgentOutput{
+		AgentName:  agentName,
+		Content:    result.Content,
+		Created:    definition.Dynamic,
+		Duration:   time.Since(start).String(),
+		EventCount: result.EventCount,
+		ChunkCount: result.ChunkCount,
+	}, nil
+}
+
+// ListAgents returns the current built-in and dynamic agents.
+// ListAgents 返回当前内置与动态 Agent。
+func (r *AgentRuntime) ListAgents(_ context.Context, _ string, _ agenttools.ListAgentsInput) (*agenttools.ListAgentsOutput, error) {
+	if r == nil {
+		return nil, errors.New("agent runtime is nil")
+	}
+	definitions := r.Definitions()
+	agents := make([]agenttools.AgentSummary, 0, len(definitions))
+	for _, definition := range definitions {
+		agents = append(agents, agenttools.AgentSummary{
+			Name:           definition.Name,
+			Description:    definition.Description,
+			PermissionMode: string(definition.PermissionMode),
+			Dynamic:        definition.Dynamic,
+		})
+	}
+	return &agenttools.ListAgentsOutput{Agents: agents}, nil
+}
+
+func (r *AgentRuntime) createRunnerLocked(ctx context.Context, definition AgentDefinition) error {
+	agent, err := newChatModelAgent(ctx, r.model, definition, nil)
+	if err != nil {
+		return err
+	}
+	r.runners[definition.Name] = adk.NewRunner(ctx, adk.RunnerConfig{
+		Agent:           agent,
+		EnableStreaming: true,
+	})
+	return nil
+}
+
+func (r *AgentRuntime) newMainRunner(ctx context.Context, mode SessionMode) (*adk.Runner, error) {
+	definition := AgentDefinition{
+		Name:           string(mode) + "-main",
+		Description:    "Main CLI agent for " + string(mode) + " mode.",
+		SystemPrompt:   prompts.MainAgentInstruction(string(mode)),
+		PermissionMode: PermissionModeDefault,
+	}
+
+	var tools []tool.BaseTool
+	if mode == SessionModeAgents || mode == SessionModePlan {
+		var err error
+		tools, err = r.agentToolsForMode(mode)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	agent, err := newChatModelAgent(ctx, r.model, definition, tools)
+	if err != nil {
+		return nil, err
+	}
+	return adk.NewRunner(ctx, adk.RunnerConfig{
+		Agent:           agent,
+		EnableStreaming: true,
+	}), nil
+}
+
+func (r *AgentRuntime) agentToolsForMode(mode SessionMode) ([]tool.BaseTool, error) {
+	return agenttools.NewAgentTools(string(mode), r)
 }
 
 func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition AgentDefinition, tools []tool.BaseTool) (*adk.ChatModelAgent, error) {
@@ -189,7 +324,7 @@ func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition 
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: tools,
 			},
-			EmitInternalEvents: true,
+			EmitInternalEvents: false,
 		}
 	}
 	agent, err := adk.NewChatModelAgent(ctx, config)
@@ -197,4 +332,20 @@ func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition 
 		return nil, err
 	}
 	return agent, nil
+}
+
+func isKnownPermissionMode(mode PermissionMode) bool {
+	switch mode {
+	case PermissionModeDefault, PermissionModeReadonly, PermissionModePlan:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAgentName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.ReplaceAll(name, "_", "-")
+	name = strings.Join(strings.Fields(name), "-")
+	return name
 }

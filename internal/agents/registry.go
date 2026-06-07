@@ -2,8 +2,11 @@ package agents
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 )
+
+var agentNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // AgentRegistry stores available agent definitions by name.
 // AgentRegistry 按名称保存可用 Agent 定义。
@@ -34,8 +37,14 @@ func (r *AgentRegistry) Register(definition AgentDefinition) error {
 	if definition.Name == "" {
 		return fmt.Errorf("agent name is required")
 	}
+	if !agentNamePattern.MatchString(definition.Name) {
+		return fmt.Errorf("agent name %q is invalid: use lowercase letters, digits, and hyphens only", definition.Name)
+	}
 	if definition.Description == "" {
 		return fmt.Errorf("agent %q description is required", definition.Name)
+	}
+	if definition.SystemPrompt == "" {
+		return fmt.Errorf("agent %q system prompt is required", definition.Name)
 	}
 	if _, exists := r.definitions[definition.Name]; exists {
 		return fmt.Errorf("agent %q is already registered", definition.Name)
