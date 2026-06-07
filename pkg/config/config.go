@@ -21,7 +21,6 @@ var (
 func Init(c *Config) {
 	once.Do(func() {
 		cfg = c
-		c.Model = options.NewModelOptions()
 	})
 }
 

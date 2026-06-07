@@ -13,8 +13,8 @@ import (
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/agents"
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/cmd/app/options"
-	pkgoptions "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/options"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
+	pkgoptions "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/options"
 )
 
 func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
@@ -61,7 +61,9 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 }
 
 func run(ctx context.Context, opts *options.Options) error {
-	cfg := &config.Config{}
+	cfg := &config.Config{
+		Model: opts.Model,
+	}
 	config.Init(cfg)
 
 	err := agents.RunAgentLoop(ctx, cfg)
@@ -69,6 +71,5 @@ func run(ctx context.Context, opts *options.Options) error {
 		return err
 	}
 
-	<-ctx.Done()
 	return nil
 }
