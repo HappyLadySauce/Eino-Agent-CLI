@@ -10,9 +10,10 @@ import (
 	"k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
 
+	"github.com/HappyLadySauce/Eino-Agent-CLI/cmd/app/agents"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/cmd/app/options"
-	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 	pkgoptions "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/options"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
 
 func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
@@ -61,6 +62,11 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 func run(ctx context.Context, opts *options.Options) error {
 	cfg := &config.Config{}
 	config.Init(cfg)
+
+	err := agents.RunAgentLoop(ctx, opts)
+	if err != nil {
+		return err
+	}
 
 	<-ctx.Done()
 	return nil
