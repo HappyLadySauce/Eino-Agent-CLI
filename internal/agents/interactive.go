@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
 
@@ -103,12 +105,14 @@ func runChatCommand(ctx context.Context, runtime *AgentRuntime, mode commands.Se
 		return fmt.Errorf("append user message: %w", err)
 	}
 
+	runCtx, stats := middlewares.NewStatsContext(ctx)
 	fmt.Print("Assistant> ")
-	result, err := runtime.RunMain(ctx, mode, history.Get(), os.Stdout)
+	result, err := runtime.RunMain(runCtx, mode, history.Get(), os.Stdout)
 	if err != nil {
 		return err
 	}
 	fmt.Println()
+	writeStatsLine(os.Stdout, stats, runtime.MaxContextTokens())
 
 	if result.Content != "" {
 		if err := history.Add(schema.AssistantMessage(result.Content, nil)); err != nil {
@@ -122,4 +126,24 @@ func runChatCommand(ctx context.Context, runtime *AgentRuntime, mode commands.Se
 // buildSubAgentDelegationPrompt 构建子命令委托提示词。
 func buildSubAgentDelegationPrompt(task string) string {
 	return "请把下面任务委托给合适的 subagent。你可以先 list_agents，必要时 create_agent，然后 run_subagent。subagent 必须使用全新上下文，最终由你汇总结果。\n\nTask:\n" + strings.TrimSpace(task)
+}
+
+func writeStatsLine(writer io.Writer, stats *middlewares.TokenStats, maxContextTokens int) {
+	if writer == nil || stats == nil {
+		return
+	}
+	snapshot := stats.Snapshot()
+	contextUsagePercent := 0.0
+	if maxContextTokens > 0 {
+		contextUsagePercent = float64(snapshot.TotalTokens) / float64(maxContextTokens) * 100
+	}
+	fmt.Fprintf(
+		writer,
+		"Stats: elapsed=%s prompt↑=%d completion↓=%d total=%d(%.2f%%)\n",
+		snapshot.Duration.Round(10_000_000).String(),
+		snapshot.PromptTokens,
+		snapshot.CompletionTokens,
+		snapshot.TotalTokens,
+		contextUsagePercent,
+	)
 }

@@ -15,11 +15,12 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/prompts"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
-	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 )
 
 // AgentRuntime owns ADK agents, runners, tools, and orchestration settings.
@@ -28,10 +29,12 @@ type AgentRuntime struct {
 	mu sync.RWMutex
 
 	model              *openai.ChatModel
+	handlers           []adk.ChatModelAgentMiddleware
 	registry           *AgentRegistry
 	runners            map[string]*adk.Runner
 	mainRunners        map[commands.SessionMode]*adk.Runner
 	maxHistoryMessages int
+	maxContextTokens   int
 }
 
 // NewAgentRuntime creates the model, built-in sub-agents, main agents, and runners.
@@ -44,13 +47,28 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		return nil, errors.New("agent config is missing model settings")
 	}
 
-	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+	modelConfig := &openai.ChatModelConfig{
 		APIKey:  cfg.Model.AuthToken,
 		BaseURL: cfg.Model.BaseURL,
 		Model:   cfg.Model.Model,
-	})
+	}
+	if cfg.Model.MaxOutputTokens > 0 {
+		modelConfig.MaxCompletionTokens = &cfg.Model.MaxOutputTokens
+	}
+	model, err := openai.NewChatModel(ctx, modelConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create chat model: %w", err)
+	}
+
+	tokenMiddleware, err := middlewares.NewTokenCountMiddleware(middlewares.TokenMiddlewareConfig{
+		ModelName:          cfg.Model.Model,
+		TokenizerModel:     cfg.Model.TokenizerModel,
+		MaxContextTokens:   cfg.Model.MaxContextTokens,
+		MaxOutputTokens:    cfg.Model.MaxOutputTokens,
+		MaxHistoryMessages: cfg.Model.MaxHistoryMessages,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create token middleware: %w", err)
 	}
 
 	registry, err := NewAgentRegistry(BuiltinAgentDefinitions())
@@ -60,10 +78,12 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 
 	runtime := &AgentRuntime{
 		model:              model,
+		handlers:           []adk.ChatModelAgentMiddleware{tokenMiddleware},
 		registry:           registry,
 		runners:            make(map[string]*adk.Runner),
 		mainRunners:        make(map[commands.SessionMode]*adk.Runner),
-		maxHistoryMessages: cfg.Model.MaxOutputTokens,
+		maxHistoryMessages: cfg.Model.MaxHistoryMessages,
+		maxContextTokens:   cfg.Model.MaxContextTokens,
 	}
 
 	for _, definition := range registry.List() {
@@ -104,6 +124,15 @@ func (r *AgentRuntime) MaxHistoryMessages() int {
 		return messages.DefaultMaxCount
 	}
 	return r.maxHistoryMessages
+}
+
+// MaxContextTokens returns the configured model context window size.
+// MaxContextTokens 返回配置的模型最大上下文 token 数。
+func (r *AgentRuntime) MaxContextTokens() int {
+	if r == nil {
+		return 0
+	}
+	return r.maxContextTokens
 }
 
 // RunMain runs the main agent with shared conversation history in the selected mode.
@@ -264,7 +293,7 @@ func (r *AgentRuntime) ListAgents(_ context.Context, _ string, _ tools.ListAgent
 }
 
 func (r *AgentRuntime) createRunnerLocked(ctx context.Context, definition AgentDefinition) error {
-	agent, err := newChatModelAgent(ctx, r.model, definition, nil)
+	agent, err := newChatModelAgent(ctx, r.model, definition, nil, r.handlers)
 	if err != nil {
 		return err
 	}
@@ -292,7 +321,7 @@ func (r *AgentRuntime) newMainRunner(ctx context.Context, mode commands.SessionM
 		}
 	}
 
-	agent, err := newChatModelAgent(ctx, r.model, definition, tools)
+	agent, err := newChatModelAgent(ctx, r.model, definition, tools, r.handlers)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +335,7 @@ func (r *AgentRuntime) agentToolsForMode(mode commands.SessionMode) ([]tool.Base
 	return tools.NewAgentTools(string(mode), r)
 }
 
-func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition AgentDefinition, tools []tool.BaseTool) (*adk.ChatModelAgent, error) {
+func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition AgentDefinition, tools []tool.BaseTool, handlers []adk.ChatModelAgentMiddleware) (*adk.ChatModelAgent, error) {
 	if definition.Name == "" {
 		return nil, errors.New("agent name is required")
 	}
@@ -319,6 +348,7 @@ func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition 
 		Description: definition.Description,
 		Model:       model,
 		Instruction: definition.SystemPrompt,
+		Handlers:    handlers,
 	}
 	if len(tools) > 0 {
 		config.ToolsConfig = adk.ToolsConfig{

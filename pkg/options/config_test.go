@@ -31,7 +31,10 @@ func TestLoadViperConfigFromSettingsJSON(t *testing.T) {
 			"auth_token": "test-token",
 			"base_url": "https://api.example.com",
 			"model": "gpt-4",
-			"max_output_tokens": 8192
+			"max_output_tokens": 8192,
+			"max_context_tokens": 128000,
+			"max_history_messages": 24,
+			"tokenizer_model": "gpt-4o"
 		}
 	}`
 	if err := os.WriteFile(settingsPath, []byte(content), 0o600); err != nil {
@@ -69,6 +72,15 @@ func TestLoadViperConfigFromSettingsJSON(t *testing.T) {
 	}
 	if got, want := viper.GetInt("model.max_output_tokens"), 8192; got != want {
 		t.Errorf("viper.GetInt(model.max_output_tokens) = %d, want %d", got, want)
+	}
+	if got, want := viper.GetInt("model.max_context_tokens"), 128000; got != want {
+		t.Errorf("viper.GetInt(model.max_context_tokens) = %d, want %d", got, want)
+	}
+	if got, want := viper.GetInt("model.max_history_messages"), 24; got != want {
+		t.Errorf("viper.GetInt(model.max_history_messages) = %d, want %d", got, want)
+	}
+	if got, want := viper.GetString("model.tokenizer_model"), "gpt-4o"; got != want {
+		t.Errorf("viper.GetString(model.tokenizer_model) = %q, want %q", got, want)
 	}
 }
 

@@ -31,6 +31,22 @@ func TestMessagesAddTrimsNilMessagesAndReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestMessagesAddAllowsMessagesWithoutUsage(t *testing.T) {
+	msgs := NewMessages(4)
+
+	if err := msgs.Add(schema.UserMessage("hello"), schema.AssistantMessage("world", nil)); err != nil {
+		t.Fatalf("Add returned error: %v", err)
+	}
+
+	got := msgs.Get()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(got))
+	}
+	if got[0].Content != "hello" || got[1].Content != "world" {
+		t.Fatalf("unexpected messages: %#v", got)
+	}
+}
+
 func TestConsumeAssistantStreamHandlesStreamingAndNonStreamingMessages(t *testing.T) {
 	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	stream := schema.StreamReaderFromArray([]*schema.Message{
