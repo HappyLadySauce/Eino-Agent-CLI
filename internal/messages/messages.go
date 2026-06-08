@@ -23,6 +23,21 @@ type AssistantStreamResult struct {
 	ChunkCount int
 }
 
+type outputChannel int
+
+const (
+	outputChannelNone outputChannel = iota
+	outputChannelFinal
+	outputChannelThinking
+	outputChannelTools
+)
+
+type channelWriter struct {
+	writer  io.Writer
+	current outputChannel
+	wrote   bool
+}
+
 // NewMessages creates a new message manager.
 // NewMessages 创建新的消息管理器。
 func NewMessages() *Messages {
@@ -116,6 +131,7 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 	}
 
 	result := &AssistantStreamResult{}
+	out := &channelWriter{writer: writer}
 	var reply strings.Builder
 
 	if iter == nil {
@@ -140,12 +156,12 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 		}
 
 		messageOutput := event.Output.MessageOutput
-		if messageOutput.Role != schema.Assistant {
+		if messageOutput.Role != schema.Assistant && messageOutput.Role != schema.Tool {
 			continue
 		}
 
 		if messageOutput.IsStreaming && messageOutput.MessageStream != nil {
-			chunkCount, err := consumeMessageStream(messageOutput.MessageStream, writer, &reply)
+			chunkCount, err := consumeMessageStream(messageOutput.MessageStream, out, &reply)
 			result.ChunkCount += chunkCount
 			if err != nil {
 				return result, fmt.Errorf("assistant message stream failed: %w", err)
@@ -153,9 +169,13 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 			continue
 		}
 
-		if err := consumeMessageEvent(event, writer, &reply); err != nil {
+		if err := consumeMessageEvent(event, out, &reply); err != nil {
 			return result, fmt.Errorf("assistant message event failed: %w", err)
 		}
+	}
+
+	if err := out.finish(); err != nil {
+		return result, fmt.Errorf("failed to finish assistant output: %w", err)
 	}
 
 	result.Content = reply.String()
@@ -164,7 +184,7 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 
 // consumeMessageStream writes streaming message chunks and appends them to reply.
 // consumeMessageStream 写出流式消息分片，并将内容追加到 reply。
-func consumeMessageStream(stream *schema.StreamReader[*schema.Message], writer io.Writer, reply *strings.Builder) (int, error) {
+func consumeMessageStream(stream *schema.StreamReader[*schema.Message], writer *channelWriter, reply *strings.Builder) (int, error) {
 	defer stream.Close()
 
 	chunkCount := 0
@@ -176,32 +196,236 @@ func consumeMessageStream(stream *schema.StreamReader[*schema.Message], writer i
 			}
 			return chunkCount, fmt.Errorf("failed to receive assistant stream chunk: %w", err)
 		}
-		if chunk == nil || chunk.Content == "" {
+		if chunk == nil {
 			continue
 		}
 
-		if _, err := io.WriteString(writer, chunk.Content); err != nil {
+		wrote, err := consumeMessage(chunk, writer, reply)
+		if err != nil {
 			return chunkCount, fmt.Errorf("failed to write assistant stream chunk: %w", err)
 		}
-		reply.WriteString(chunk.Content)
-		chunkCount++
+		if wrote {
+			chunkCount++
+		}
 	}
 }
 
 // consumeMessageEvent writes a non-streaming assistant message and appends it to reply.
 // consumeMessageEvent 写出非流式 assistant 消息，并将内容追加到 reply。
-func consumeMessageEvent(event *adk.AgentEvent, writer io.Writer, reply *strings.Builder) error {
+func consumeMessageEvent(event *adk.AgentEvent, writer *channelWriter, reply *strings.Builder) error {
 	msg, _, err := adk.GetMessage(event)
 	if err != nil {
 		return fmt.Errorf("failed to extract assistant message: %w", err)
 	}
-	if msg == nil || msg.Content == "" {
+	if msg == nil {
 		return nil
 	}
 
-	if _, err := io.WriteString(writer, msg.Content); err != nil {
-		return fmt.Errorf("failed to write assistant message: %w", err)
+	_, err = consumeMessage(msg, writer, reply)
+	return err
+}
+
+func consumeMessage(msg *schema.Message, writer *channelWriter, reply *strings.Builder) (bool, error) {
+	wrote := false
+
+	if msg.ReasoningContent != "" {
+		if err := writer.write(outputChannelThinking, msg.ReasoningContent); err != nil {
+			return wrote, err
+		}
+		wrote = true
 	}
-	reply.WriteString(msg.Content)
+
+	for _, part := range msg.AssistantGenMultiContent {
+		switch part.Type {
+		case schema.ChatMessagePartTypeReasoning:
+			if part.Reasoning == nil || part.Reasoning.Text == "" {
+				continue
+			}
+			if err := writer.write(outputChannelThinking, part.Reasoning.Text); err != nil {
+				return wrote, err
+			}
+			wrote = true
+		case schema.ChatMessagePartTypeText:
+			partWrote, err := writeAssistantContent(writer, reply, part.Text)
+			if err != nil {
+				return wrote, err
+			}
+			wrote = wrote || partWrote
+		}
+	}
+
+	if len(msg.ToolCalls) > 0 {
+		for _, toolCall := range msg.ToolCalls {
+			if err := writer.writeLine(outputChannelTools, formatToolCall(toolCall)); err != nil {
+				return wrote, err
+			}
+			wrote = true
+		}
+	}
+
+	if msg.Role == schema.Tool && msg.Content != "" {
+		if err := writer.writeLine(outputChannelTools, formatToolResult(msg)); err != nil {
+			return wrote, err
+		}
+		wrote = true
+	}
+
+	if msg.Role == schema.Assistant {
+		contentWrote, err := writeAssistantContent(writer, reply, msg.Content)
+		if err != nil {
+			return wrote, err
+		}
+		wrote = wrote || contentWrote
+	}
+	return wrote, nil
+}
+
+func writeAssistantContent(writer *channelWriter, reply *strings.Builder, content string) (bool, error) {
+	if content == "" {
+		return false, nil
+	}
+
+	wrote := false
+	for _, segment := range splitAssistantContent(content) {
+		text := segment.text
+		if text == "" {
+			continue
+		}
+		channel := outputChannelFinal
+		if segment.thinking {
+			channel = outputChannelThinking
+		} else {
+			reply.WriteString(text)
+		}
+		if err := writer.write(channel, text); err != nil {
+			return wrote, err
+		}
+		wrote = true
+	}
+	return wrote, nil
+}
+
+type assistantContentSegment struct {
+	text     string
+	thinking bool
+}
+
+func splitAssistantContent(content string) []assistantContentSegment {
+	const startMarker = "<|channel>thought"
+	const endMarker = "<channel|>"
+
+	var segments []assistantContentSegment
+	remaining := content
+	for {
+		start := strings.Index(remaining, startMarker)
+		if start < 0 {
+			if remaining != "" {
+				segments = append(segments, assistantContentSegment{text: remaining})
+			}
+			return segments
+		}
+		if start > 0 {
+			segments = append(segments, assistantContentSegment{text: remaining[:start]})
+		}
+
+		thinkingStart := start + len(startMarker)
+		if strings.HasPrefix(remaining[thinkingStart:], "\r\n") {
+			thinkingStart += 2
+		} else if strings.HasPrefix(remaining[thinkingStart:], "\n") {
+			thinkingStart++
+		}
+		afterStart := remaining[thinkingStart:]
+		end := strings.Index(afterStart, endMarker)
+		if end < 0 {
+			segments = append(segments, assistantContentSegment{text: afterStart, thinking: true})
+			return segments
+		}
+
+		segments = append(segments, assistantContentSegment{text: afterStart[:end], thinking: true})
+		remaining = afterStart[end+len(endMarker):]
+	}
+}
+
+func formatToolCall(toolCall schema.ToolCall) string {
+	name := toolCall.Function.Name
+	if name == "" {
+		name = toolCall.ID
+	}
+	if toolCall.Function.Arguments == "" {
+		return name
+	}
+	return fmt.Sprintf("%s %s", name, toolCall.Function.Arguments)
+}
+
+func formatToolResult(msg *schema.Message) string {
+	name := msg.ToolName
+	if name == "" {
+		name = msg.ToolCallID
+	}
+	if name == "" {
+		return msg.Content
+	}
+	return fmt.Sprintf("%s: %s", name, msg.Content)
+}
+
+func (w *channelWriter) write(channel outputChannel, text string) error {
+	if text == "" {
+		return nil
+	}
+	if err := w.ensureChannel(channel); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w.writer, text)
+	return err
+}
+
+func (w *channelWriter) writeLine(channel outputChannel, text string) error {
+	if text == "" {
+		return nil
+	}
+	if err := w.write(channel, text); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w.writer, "\n"); err != nil {
+		return err
+	}
+	w.current = outputChannelNone
 	return nil
+}
+
+func (w *channelWriter) ensureChannel(channel outputChannel) error {
+	if w.current == channel {
+		return nil
+	}
+	if w.current != outputChannelNone {
+		if _, err := io.WriteString(w.writer, "\n"); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w.writer, channelPrefix(channel)); err != nil {
+		return err
+	}
+	w.current = channel
+	w.wrote = true
+	return nil
+}
+
+func (w *channelWriter) finish() error {
+	if !w.wrote || w.current == outputChannelNone {
+		return nil
+	}
+	_, err := io.WriteString(w.writer, "\n")
+	w.current = outputChannelNone
+	return err
+}
+
+func channelPrefix(channel outputChannel) string {
+	switch channel {
+	case outputChannelThinking:
+		return "Assistant[thinking]> "
+	case outputChannelTools:
+		return "Assistant[tools]> "
+	default:
+		return "Assistant> "
+	}
 }

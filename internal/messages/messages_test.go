@@ -68,14 +68,74 @@ func TestConsumeAssistantStreamHandlesStreamingAndNonStreamingMessages(t *testin
 	if result.Content != "hello!" {
 		t.Fatalf("expected content %q, got %q", "hello!", result.Content)
 	}
-	if out.String() != "hello!" {
-		t.Fatalf("expected output %q, got %q", "hello!", out.String())
+	wantOutput := "Assistant> hello!\nAssistant[tools]> tool-call-id: ignored\n"
+	if out.String() != wantOutput {
+		t.Fatalf("expected output %q, got %q", wantOutput, out.String())
 	}
 	if result.EventCount != 3 {
 		t.Fatalf("expected 3 events, got %d", result.EventCount)
 	}
 	if result.ChunkCount != 2 {
 		t.Fatalf("expected 2 chunks, got %d", result.ChunkCount)
+	}
+}
+
+func TestConsumeAssistantStreamSeparatesThinkingToolsAndFinalContent(t *testing.T) {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	stream := schema.StreamReaderFromArray([]*schema.Message{
+		{Role: schema.Assistant, ReasoningContent: "checking tools"},
+		schema.AssistantMessage("final answer", []schema.ToolCall{
+			{
+				ID:   "call-1",
+				Type: "function",
+				Function: schema.FunctionCall{
+					Name:      "list_agents",
+					Arguments: `{"type":"all"}`,
+				},
+			},
+		}),
+	})
+
+	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
+	gen.Send(adk.EventFromMessage(schema.ToolMessage("tool output", "call-1", schema.WithToolName("list_agents")), nil, schema.Tool, "list_agents"))
+	gen.Close()
+
+	var out bytes.Buffer
+	result, err := ConsumeAssistantStream(iter, &out)
+	if err != nil {
+		t.Fatalf("ConsumeAssistantStream returned error: %v", err)
+	}
+
+	if result.Content != "final answer" {
+		t.Fatalf("expected final content %q, got %q", "final answer", result.Content)
+	}
+	wantOutput := "Assistant[thinking]> checking tools\nAssistant[tools]> list_agents {\"type\":\"all\"}\nAssistant> final answer\nAssistant[tools]> list_agents: tool output\n"
+	if out.String() != wantOutput {
+		t.Fatalf("unexpected output:\ngot:  %q\nwant: %q", out.String(), wantOutput)
+	}
+}
+
+func TestConsumeAssistantStreamRoutesLeakedThoughtChannelToThinking(t *testing.T) {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	stream := schema.StreamReaderFromArray([]*schema.Message{
+		schema.AssistantMessage("<|channel>thought\nhidden<channel|>visible", nil),
+	})
+
+	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
+	gen.Close()
+
+	var out bytes.Buffer
+	result, err := ConsumeAssistantStream(iter, &out)
+	if err != nil {
+		t.Fatalf("ConsumeAssistantStream returned error: %v", err)
+	}
+
+	if result.Content != "visible" {
+		t.Fatalf("expected final content %q, got %q", "visible", result.Content)
+	}
+	wantOutput := "Assistant[thinking]> hidden\nAssistant> visible\n"
+	if out.String() != wantOutput {
+		t.Fatalf("unexpected output:\ngot:  %q\nwant: %q", out.String(), wantOutput)
 	}
 }
 

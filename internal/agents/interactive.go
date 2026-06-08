@@ -106,12 +106,10 @@ func runChatCommand(ctx context.Context, runtime *AgentRuntime, mode commands.Se
 	}
 
 	runCtx, stats := middlewares.NewStatsContext(ctx)
-	fmt.Print("Assistant> ")
 	result, err := runtime.RunMain(runCtx, mode, history.Get(), os.Stdout)
 	if err != nil {
 		return err
 	}
-	fmt.Println()
 	writeStatsLine(os.Stdout, stats, runtime.MaxContextTokens())
 
 	if result.Content != "" {
