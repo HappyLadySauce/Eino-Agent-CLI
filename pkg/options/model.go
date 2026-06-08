@@ -2,6 +2,7 @@ package options
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/spf13/pflag"
 )
@@ -20,6 +21,8 @@ func NewModelOptions() *ModelOptions {
 func (o *ModelOptions) Validate() error {
 	var errs error
 
+	o.BaseURL = normalizeBaseURL(o.BaseURL)
+
 	if o.BaseURL == "" {
 		errs = errors.Join(errs, errors.New("base_url is required"))
 	}
@@ -28,6 +31,20 @@ func (o *ModelOptions) Validate() error {
 	}
 
 	return errs
+}
+
+// normalizeBaseURL ensures the model endpoint has an explicit URL scheme.
+// Ollama-style host:port values are normalized to http:// by default.
+// normalizeBaseURL 确保模型端点带有明确的 URL scheme；类似 Ollama 的 host:port 默认补全为 http://。
+func normalizeBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "://") {
+		return strings.TrimRight(raw, "/")
+	}
+	return "http://" + strings.TrimRight(raw, "/")
 }
 
 func (o *ModelOptions) AddFlags(fs *pflag.FlagSet) {

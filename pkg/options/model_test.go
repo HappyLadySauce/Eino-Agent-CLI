@@ -31,3 +31,18 @@ func TestModelOptionsValidatePassesWithRequiredFields(t *testing.T) {
 		t.Errorf("Validate() error = %v, want nil", err)
 	}
 }
+
+// TestModelOptionsValidateNormalizesBaseURL ensures host:port base URLs gain an http scheme.
+// TestModelOptionsValidateNormalizesBaseURL 确认 host:port 形式的 base URL 会自动补全 http scheme。
+func TestModelOptionsValidateNormalizesBaseURL(t *testing.T) {
+	o := &ModelOptions{
+		BaseURL: "100.100.100.254:11434/v1",
+		Model:   "gemma",
+	}
+	if err := o.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+	if o.BaseURL != "http://100.100.100.254:11434/v1" {
+		t.Errorf("BaseURL = %q, want %q", o.BaseURL, "http://100.100.100.254:11434/v1")
+	}
+}
