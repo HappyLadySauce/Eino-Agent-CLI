@@ -11,7 +11,7 @@ import (
 )
 
 func TestWriteStatsLinePrintsCurrentTurnSummary(t *testing.T) {
-	stats := &middlewares.TokenStats{}
+	stats := &middlewares.ContextStats{}
 	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8})
 	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 7, CompletionTokens: 2, TotalTokens: 9})
 	stats.RecordDuration(150 * time.Millisecond)
@@ -29,8 +29,8 @@ func TestWriteStatsLinePrintsCurrentTurnSummary(t *testing.T) {
 func TestSessionTokenStatsAccumulatesTurns(t *testing.T) {
 	session := &sessionTokenStats{}
 
-	first := session.AddTurn(middlewares.TokenStatsSnapshot{TotalTokens: 8})
-	second := session.AddTurn(middlewares.TokenStatsSnapshot{TotalTokens: 13})
+	first := session.AddTurn(middlewares.ContextStatsSnapshot{TotalTokens: 8})
+	second := session.AddTurn(middlewares.ContextStatsSnapshot{TotalTokens: 13})
 
 	if first != 8 || second != 21 || session.Total() != 21 {
 		t.Fatalf("unexpected session totals: first=%d second=%d total=%d", first, second, session.Total())

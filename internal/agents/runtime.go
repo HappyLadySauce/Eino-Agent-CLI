@@ -59,7 +59,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		return nil, fmt.Errorf("create chat model: %w", err)
 	}
 
-	tokenMiddleware, err := middlewares.NewTokenCountMiddleware(middlewares.TokenMiddlewareConfig{
+	contextMiddleware, err := middlewares.NewContextMiddleware(middlewares.ContextMiddlewareConfig{
 		ModelName:          cfg.Model.Model,
 		TokenizerModel:     cfg.Model.TokenizerModel,
 		MaxContextTokens:   cfg.Model.MaxContextTokens,
@@ -67,7 +67,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		MaxHistoryMessages: cfg.Model.MaxHistoryMessages,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create token middleware: %w", err)
+		return nil, fmt.Errorf("create context middleware: %w", err)
 	}
 
 	registry, err := NewAgentRegistry(BuiltinAgentDefinitions())
@@ -77,7 +77,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 
 	runtime := &AgentRuntime{
 		model:            model,
-		handlers:         []adk.ChatModelAgentMiddleware{tokenMiddleware},
+		handlers:         []adk.ChatModelAgentMiddleware{contextMiddleware},
 		registry:         registry,
 		runners:          make(map[string]*adk.Runner),
 		mainRunners:      make(map[commands.SessionMode]*adk.Runner),

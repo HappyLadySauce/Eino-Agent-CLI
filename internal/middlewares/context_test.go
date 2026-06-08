@@ -9,15 +9,15 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func TestTokenMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
-	handler, err := NewTokenCountMiddleware(TokenMiddlewareConfig{
+func TestContextMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
+	handler, err := NewContextMiddleware(ContextMiddlewareConfig{
 		ModelName:          "unknown-local-model",
 		MaxContextTokens:   80,
 		MaxOutputTokens:    16,
 		MaxHistoryMessages: 10,
 	})
 	if err != nil {
-		t.Fatalf("NewTokenCountMiddleware() error = %v", err)
+		t.Fatalf("NewContextMiddleware() error = %v", err)
 	}
 
 	state := &adk.ChatModelAgentState{
@@ -43,15 +43,15 @@ func TestTokenMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
 	}
 }
 
-func TestTokenMiddlewareKeepsMessagesWithinBudgetUnchanged(t *testing.T) {
-	handler, err := NewTokenCountMiddleware(TokenMiddlewareConfig{
+func TestContextMiddlewareKeepsMessagesWithinBudgetUnchanged(t *testing.T) {
+	handler, err := NewContextMiddleware(ContextMiddlewareConfig{
 		ModelName:          "unknown-local-model",
 		MaxContextTokens:   128000,
 		MaxOutputTokens:    32000,
 		MaxHistoryMessages: 10,
 	})
 	if err != nil {
-		t.Fatalf("NewTokenCountMiddleware() error = %v", err)
+		t.Fatalf("NewContextMiddleware() error = %v", err)
 	}
 
 	original := []*schema.Message{
@@ -78,14 +78,14 @@ func TestTokenMiddlewareKeepsMessagesWithinBudgetUnchanged(t *testing.T) {
 
 func TestTokenStatsRecordsUsageAndCallCount(t *testing.T) {
 	ctx, stats := NewStatsContext(context.Background())
-	handler, err := NewTokenCountMiddleware(TokenMiddlewareConfig{
+	handler, err := NewContextMiddleware(ContextMiddlewareConfig{
 		ModelName:          "unknown-local-model",
 		MaxContextTokens:   128000,
 		MaxOutputTokens:    32000,
 		MaxHistoryMessages: 10,
 	})
 	if err != nil {
-		t.Fatalf("NewTokenCountMiddleware() error = %v", err)
+		t.Fatalf("NewContextMiddleware() error = %v", err)
 	}
 
 	withUsage := schema.AssistantMessage("ok", nil)
@@ -118,7 +118,7 @@ func TestTokenStatsRecordsUsageAndCallCount(t *testing.T) {
 }
 
 func TestTokenStatsRecordsMaxPromptAcrossModelCalls(t *testing.T) {
-	stats := &TokenStats{}
+	stats := &ContextStats{}
 
 	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18})
 	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 29, CompletionTokens: 5, TotalTokens: 34})
@@ -130,12 +130,12 @@ func TestTokenStatsRecordsMaxPromptAcrossModelCalls(t *testing.T) {
 	}
 }
 
-func TestPromptTokenBudgetReservesSafetyMargin(t *testing.T) {
-	if got, want := promptTokenBudget(128000, 32000), 93952; got != want {
-		t.Fatalf("promptTokenBudget() = %d, want %d", got, want)
+func TestPromptBudgetReservesSafetyMargin(t *testing.T) {
+	if got, want := promptBudget(128000, 32000), 93952; got != want {
+		t.Fatalf("promptBudget() = %d, want %d", got, want)
 	}
-	if got, want := promptTokenBudget(80, 16), 61; got != want {
-		t.Fatalf("promptTokenBudget() small budget = %d, want %d", got, want)
+	if got, want := promptBudget(80, 16), 61; got != want {
+		t.Fatalf("promptBudget() small budget = %d, want %d", got, want)
 	}
 }
 

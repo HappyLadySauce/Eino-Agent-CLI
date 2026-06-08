@@ -48,7 +48,7 @@ type sessionTokenStats struct {
 // 使用示例：
 //
 //	total := session.AddTurn(stats.Snapshot())
-func (s *sessionTokenStats) AddTurn(turn middlewares.TokenStatsSnapshot) int {
+func (s *sessionTokenStats) AddTurn(turn middlewares.ContextStatsSnapshot) int {
 	if s == nil || turn.TotalTokens <= 0 {
 		return s.Total()
 	}
@@ -186,7 +186,7 @@ func buildSubAgentDelegationPrompt(task string) string {
 	return "请把下面任务委托给合适的 subagent。你可以先 list_agents，必要时 create_agent，然后 run_subagent。subagent 必须使用全新上下文，最终由你汇总结果。\n\nTask:\n" + strings.TrimSpace(task)
 }
 
-func writeStatsLine(writer io.Writer, stats *middlewares.TokenStats, maxContextTokens int, sessionTotalTokens int) {
+func writeStatsLine(writer io.Writer, stats *middlewares.ContextStats, maxContextTokens int, sessionTotalTokens int) {
 	if writer == nil || stats == nil {
 		return
 	}

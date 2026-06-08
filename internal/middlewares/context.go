@@ -15,64 +15,64 @@ import (
 
 type statsContextKey struct{}
 
-// TokenMiddlewareConfig configures per-call message reduction and token accounting.
-// TokenMiddlewareConfig 配置每次模型调用前的消息裁剪与 token 统计。
-type TokenMiddlewareConfig struct {
-	ModelName          string
-	TokenizerModel     string
-	MaxContextTokens   int
-	MaxOutputTokens    int
-	MaxHistoryMessages int
+// ContextMiddlewareConfig configures per-call message trimming against the model context window.
+// ContextMiddlewareConfig 配置每次模型调用前的消息裁剪与上下文窗口预算。
+type ContextMiddlewareConfig struct {
+	ModelName          string	// 模型名称
+	TokenizerModel     string	// 分词器模型名称
+	MaxContextTokens   int	// 最大上下文窗口大小
+	MaxOutputTokens    int	// 最大输出窗口大小
+	MaxHistoryMessages int	// 最大历史消息数量
 }
 
-// TokenStatsSnapshot is an immutable view of accumulated model usage for one user turn.
-// TokenStatsSnapshot 是单轮用户请求模型使用情况的不可变快照。
-type TokenStatsSnapshot struct {
-	PromptTokens     int
-	MaxPromptTokens  int
-	CompletionTokens int
-	TotalTokens      int
-	CallCount        int
-	Duration         time.Duration
+// ContextStatsSnapshot is an immutable view of accumulated context window usage for one user turn.
+// ContextStatsSnapshot 是单轮用户请求模型上下文窗口使用情况的不可变快照。
+type ContextStatsSnapshot struct {
+	PromptTokens     int	// 模型输入提示词 token 数量
+	MaxPromptTokens  int	// 最大模型输入提示词 token 数量
+	CompletionTokens int	// 模型输出完成词 token 数量
+	TotalTokens      int	// 总 token 数量
+	CallCount        int	// 调用次数
+	Duration         time.Duration	// 模型调用耗时
 }
 
-// TokenStats accumulates model usage for the current user turn.
-// TokenStats 汇总当前用户请求中的模型使用情况。
-type TokenStats struct {
+// ContextStats accumulates context window usage for the current user turn.
+// ContextStats 汇总当前用户请求中的上下文窗口使用情况。
+type ContextStats struct {
 	mu sync.RWMutex
 
 	start            time.Time
-	promptTokens     int
-	maxPromptTokens  int
-	completionTokens int
-	totalTokens      int
-	callCount        int
-	duration         time.Duration
+	promptTokens     int	// 模型输入提示词 token 数量
+	maxPromptTokens  int	// 最大提示词 token 数量
+	completionTokens int	// 模型输出完成词 token 数量
+	totalTokens      int	// 总 token 数量
+	callCount        int	// 调用次数
+	duration         time.Duration	// 模型调用耗时
 }
 
-// NewStatsContext attaches a fresh token stats accumulator to ctx.
-// NewStatsContext 在 ctx 上挂载新的 token 统计器。
-func NewStatsContext(ctx context.Context) (context.Context, *TokenStats) {
+// NewStatsContext attaches a fresh context stats accumulator to ctx.
+// NewStatsContext 在 ctx 上挂载新的上下文窗口统计器。
+func NewStatsContext(ctx context.Context) (context.Context, *ContextStats) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	stats := &TokenStats{start: time.Now()}
+	stats := &ContextStats{start: time.Now()}
 	return context.WithValue(ctx, statsContextKey{}, stats), stats
 }
 
-// StatsFromContext returns the token stats accumulator attached to ctx.
-// StatsFromContext 返回 ctx 上挂载的 token 统计器。
-func StatsFromContext(ctx context.Context) *TokenStats {
+// StatsFromContext returns the context stats accumulator attached to ctx.
+// StatsFromContext 返回 ctx 上挂载的上下文窗口统计器。
+func StatsFromContext(ctx context.Context) *ContextStats {
 	if ctx == nil {
 		return nil
 	}
-	stats, _ := ctx.Value(statsContextKey{}).(*TokenStats)
+	stats, _ := ctx.Value(statsContextKey{}).(*ContextStats)
 	return stats
 }
 
-// RecordUsage records one model call and any token usage returned by the model.
-// RecordUsage 记录一次模型调用，以及模型返回的 token 使用量。
-func (s *TokenStats) RecordUsage(usage *schema.TokenUsage) {
+// RecordUsage records one model call and any context window usage returned by the model.
+// RecordUsage 记录一次模型调用，以及模型返回的上下文窗口使用量。
+func (s *ContextStats) RecordUsage(usage *schema.TokenUsage) {
 	if s == nil {
 		return
 	}
@@ -93,7 +93,7 @@ func (s *TokenStats) RecordUsage(usage *schema.TokenUsage) {
 
 // RecordDuration adds a measured model-call duration to the current stats.
 // RecordDuration 累加模型调用耗时。
-func (s *TokenStats) RecordDuration(duration time.Duration) {
+func (s *ContextStats) RecordDuration(duration time.Duration) {
 	if s == nil || duration <= 0 {
 		return
 	}
@@ -104,9 +104,9 @@ func (s *TokenStats) RecordDuration(duration time.Duration) {
 
 // Snapshot returns a stable copy of current stats.
 // Snapshot 返回当前统计的稳定副本。
-func (s *TokenStats) Snapshot() TokenStatsSnapshot {
+func (s *ContextStats) Snapshot() ContextStatsSnapshot {
 	if s == nil {
-		return TokenStatsSnapshot{}
+		return ContextStatsSnapshot{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -115,7 +115,7 @@ func (s *TokenStats) Snapshot() TokenStatsSnapshot {
 	if !s.start.IsZero() {
 		duration = time.Since(s.start)
 	}
-	return TokenStatsSnapshot{
+	return ContextStatsSnapshot{
 		PromptTokens:     s.promptTokens,
 		MaxPromptTokens:  s.maxPromptTokens,
 		CompletionTokens: s.completionTokens,
@@ -125,29 +125,29 @@ func (s *TokenStats) Snapshot() TokenStatsSnapshot {
 	}
 }
 
-type tokenMiddleware struct {
+type contextMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
 
-	config  TokenMiddlewareConfig
+	config  ContextMiddlewareConfig
 	counter *tokenutils.TokenCounter
 }
 
-// NewTokenCountMiddleware creates a ChatModelAgent middleware for trimming and token accounting.
-// NewTokenCountMiddleware 创建用于消息裁剪与 token 统计的 ChatModelAgent middleware。
-func NewTokenCountMiddleware(config TokenMiddlewareConfig) (adk.ChatModelAgentMiddleware, error) {
-	normalizeTokenConfig(&config)
+// NewContextMiddleware creates a ChatModelAgent middleware for context-window trimming and usage accounting.
+// NewContextMiddleware 创建用于上下文窗口裁剪与用量统计的 ChatModelAgent middleware。
+func NewContextMiddleware(config ContextMiddlewareConfig) (adk.ChatModelAgentMiddleware, error) {
+	normalizeContextConfig(&config)
 	counter, err := tokenutils.NewTokenCounter(config.ModelName, config.TokenizerModel)
 	if err != nil {
 		return nil, err
 	}
-	return &tokenMiddleware{
+	return &contextMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
 		config:                       config,
 		counter:                      counter,
 	}, nil
 }
 
-func normalizeTokenConfig(config *TokenMiddlewareConfig) {
+func normalizeContextConfig(config *ContextMiddlewareConfig) {
 	if config.MaxContextTokens <= 0 {
 		config.MaxContextTokens = 128000
 	}
@@ -159,13 +159,13 @@ func normalizeTokenConfig(config *TokenMiddlewareConfig) {
 	}
 }
 
-func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+func (m *contextMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	if state == nil || len(state.Messages) == 0 {
 		return ctx, state, nil
 	}
 
 	messages := messageutils.TrimByMessageCount(state.Messages, m.config.MaxHistoryMessages)
-	budget := promptTokenBudget(m.config.MaxContextTokens, m.config.MaxOutputTokens)
+	budget := promptBudget(m.config.MaxContextTokens, m.config.MaxOutputTokens)
 	if budget > 0 {
 		var err error
 		messages, err = messageutils.TrimByTokenBudget(messages, state.ToolInfos, budget, m.counter)
@@ -182,9 +182,9 @@ func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *ad
 	return ctx, &trimmed, nil
 }
 
-// promptTokenBudget reserves output and estimation safety margin from the context window.
-// promptTokenBudget 从上下文窗口中扣除输出预算和估算安全余量。
-func promptTokenBudget(maxContextTokens, maxOutputTokens int) int {
+// promptBudget reserves output and estimation safety margin from the context window.
+// promptBudget 从上下文窗口中扣除输出预算和估算安全余量。
+func promptBudget(maxContextTokens, maxOutputTokens int) int {
 	budget := maxContextTokens - maxOutputTokens
 	if budget <= 0 {
 		return budget
@@ -208,14 +208,14 @@ func promptBudgetSafetyMargin(budget int) int {
 	return margin
 }
 
-func (m *tokenMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+func (m *contextMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	if stats := StatsFromContext(ctx); stats != nil {
 		stats.RecordUsage(messageutils.LatestAssistantUsage(state.Messages))
 	}
 	return ctx, state, nil
 }
 
-func (m *tokenMiddleware) WrapModel(ctx context.Context, next model.BaseModel[*schema.Message], mc *adk.ModelContext) (model.BaseModel[*schema.Message], error) {
+func (m *contextMiddleware) WrapModel(ctx context.Context, next model.BaseModel[*schema.Message], mc *adk.ModelContext) (model.BaseModel[*schema.Message], error) {
 	if next == nil {
 		return next, nil
 	}
