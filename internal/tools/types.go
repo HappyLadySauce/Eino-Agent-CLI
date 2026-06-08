@@ -6,7 +6,7 @@ type CreateAgentInput struct {
 	Name           string `json:"name" jsonschema:"required" jsonschema_description:"Unique lowercase agent name using letters, digits, and hyphens."`
 	Description    string `json:"description" jsonschema:"required" jsonschema_description:"Short description of when this agent should be used."`
 	Instruction    string `json:"instruction" jsonschema:"required" jsonschema_description:"System instruction for the new sub-agent."`
-	PermissionMode string `json:"permission_mode,omitempty" jsonschema_description:"Permission mode: readonly, plan, or default. In plan mode only readonly and plan are allowed."`
+	PermissionMode string `json:"permission_mode" jsonschema:"required" jsonschema_description:"Required permission mode: readonly, plan, or default. In plan mode only readonly and plan are allowed."`
 }
 
 // CreateAgentOutput is returned after a dynamic sub-agent is registered.
@@ -22,7 +22,7 @@ type CreateAgentOutput struct {
 // RunSubAgentInput 是使用隔离上下文运行子 Agent 的工具入参。
 type RunSubAgentInput struct {
 	Task           string `json:"task" jsonschema:"required" jsonschema_description:"Complete task for the sub-agent."`
-	AgentName      string `json:"agent_name,omitempty" jsonschema_description:"Optional existing or newly created agent name. Empty uses a safe default for the current mode."`
+	AgentName      string `json:"agent_name" jsonschema:"required" jsonschema_description:"Required existing or newly created agent name. There is no default sub-agent."`
 	ContextSummary string `json:"context_summary,omitempty" jsonschema_description:"Only the necessary background summarized by the main agent; never pass full chat history."`
 	ExpectedOutput string `json:"expected_output,omitempty" jsonschema_description:"Optional expected output format or acceptance criteria."`
 }

@@ -21,7 +21,7 @@ type AgentToolService interface {
 func NewAgentTools(mode string, service AgentToolService) ([]einotool.BaseTool, error) {
 	listAgentsTool, err := toolutils.InferTool[ListAgentsInput, *ListAgentsOutput](
 		"list_agents",
-		"List available built-in and dynamically created sub-agents with their permissions. Use this before deciding whether to reuse an agent or create a new one.",
+		"List available dynamically created sub-agents with their permissions. The list may be empty; use this before deciding whether to reuse an agent or create a new one.",
 		func(ctx context.Context, input ListAgentsInput) (*ListAgentsOutput, error) {
 			return service.ListAgents(ctx, mode, input)
 		},
@@ -32,7 +32,7 @@ func NewAgentTools(mode string, service AgentToolService) ([]einotool.BaseTool, 
 
 	createAgentTool, err := toolutils.InferTool[CreateAgentInput, *CreateAgentOutput](
 		"create_agent",
-		"Create a new in-memory sub-agent when existing agents are not specific enough. In plan mode only readonly or plan agents are allowed.",
+		"Create a new in-memory sub-agent when existing agents are not specific enough. permission_mode is required. In plan mode only readonly or plan agents are allowed.",
 		func(ctx context.Context, input CreateAgentInput) (*CreateAgentOutput, error) {
 			return service.CreateAgent(ctx, mode, input)
 		},
@@ -43,7 +43,7 @@ func NewAgentTools(mode string, service AgentToolService) ([]einotool.BaseTool, 
 
 	runSubAgentTool, err := toolutils.InferTool[RunSubAgentInput, *RunSubAgentOutput](
 		"run_subagent",
-		"Run one sub-agent with a fresh isolated context. Provide task and only the necessary context_summary; the final result is returned to the main agent.",
+		"Run one named sub-agent with a fresh isolated context. agent_name is required. Provide task and only the necessary context_summary; the final result is returned to the main agent.",
 		func(ctx context.Context, input RunSubAgentInput) (*RunSubAgentOutput, error) {
 			return service.RunSubAgent(ctx, mode, input)
 		},

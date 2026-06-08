@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -12,8 +11,8 @@ type SessionMode string
 
 const (
 	SessionModeAgent SessionMode = "agent"
-	SessionModePlan   SessionMode = "plan"
-	SessionModeAsk    SessionMode = "ask"
+	SessionModePlan  SessionMode = "plan"
+	SessionModeAsk   SessionMode = "ask"
 )
 
 // AgentCommandKind identifies one CLI agent command.
@@ -24,7 +23,6 @@ const (
 	AgentCommandChat AgentCommandKind = iota
 	AgentCommandExit
 	AgentCommandModeSwitch
-	AgentCommandSubAgent
 )
 
 // AgentCommand is the parsed representation of one user input line.
@@ -51,14 +49,6 @@ func ParseAgentCommand(input string) (AgentCommand, error) {
 		return AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModePlan}, nil
 	case "/ask":
 		return AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAsk}, nil
-	}
-
-	if strings.HasPrefix(text, "/subagent ") {
-		task := strings.TrimSpace(strings.TrimPrefix(text, "/subagent "))
-		if task == "" {
-			return AgentCommand{}, errors.New("/subagent requires a task")
-		}
-		return AgentCommand{Kind: AgentCommandSubAgent, Prompt: task}, nil
 	}
 
 	if strings.HasPrefix(text, "/") {

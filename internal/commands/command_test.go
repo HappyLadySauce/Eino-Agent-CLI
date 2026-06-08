@@ -37,9 +37,9 @@ func TestParseAgentCommand(t *testing.T) {
 			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAsk},
 		},
 		{
-			name:  "subagent",
-			input: "/subagent 检查错误传递",
-			want:  AgentCommand{Kind: AgentCommandSubAgent, Prompt: "检查错误传递"},
+			name:    "subagent command removed",
+			input:   "/subagent 检查错误传递",
+			wantErr: true,
 		},
 		{
 			name:    "old agent command removed",
@@ -49,11 +49,6 @@ func TestParseAgentCommand(t *testing.T) {
 		{
 			name:    "old parallel command removed",
 			input:   "/parallel verify 检查错误 || 检查并发",
-			wantErr: true,
-		},
-		{
-			name:    "empty subagent",
-			input:   "/subagent ",
 			wantErr: true,
 		},
 		{

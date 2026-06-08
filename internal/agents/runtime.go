@@ -36,8 +36,8 @@ type AgentRuntime struct {
 	maxContextTokens int
 }
 
-// NewAgentRuntime creates the model, built-in sub-agents, main agents, and runners.
-// NewAgentRuntime 创建模型、内置子 Agent、主 Agent 与 Runner。
+// NewAgentRuntime creates the model, dynamic agent registry, main agents, and runners.
+// NewAgentRuntime 创建模型、动态 Agent 注册表、主 Agent 与 Runner。
 func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
@@ -70,7 +70,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		return nil, fmt.Errorf("create context middleware: %w", err)
 	}
 
-	registry, err := NewAgentRegistry(BuiltinAgentDefinitions())
+	registry, err := NewAgentRegistry(nil)
 	if err != nil {
 		return nil, fmt.Errorf("create agent registry: %w", err)
 	}
@@ -82,15 +82,6 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		runners:          make(map[string]*adk.Runner),
 		mainRunners:      make(map[commands.SessionMode]*adk.Runner),
 		maxContextTokens: cfg.Model.MaxContextTokens,
-	}
-
-	for _, definition := range registry.List() {
-		if definition.Name == AgentGeneralPurpose {
-			continue
-		}
-		if err := runtime.createRunnerLocked(ctx, definition); err != nil {
-			return nil, fmt.Errorf("create built-in sub-agent %q: %w", definition.Name, err)
-		}
 	}
 
 	for _, mode := range []commands.SessionMode{commands.SessionModeAgent, commands.SessionModePlan, commands.SessionModeAsk} {
@@ -156,23 +147,9 @@ func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input tools
 		return nil, errors.New("agent runtime is nil")
 	}
 
-	sessionMode := commands.SessionMode(mode)
-	permission := PermissionMode(strings.TrimSpace(input.PermissionMode))
-	if permission == "" {
-		if sessionMode == commands.SessionModePlan {
-			permission = PermissionModePlan
-		} else {
-			permission = PermissionModeReadonly
-		}
-	}
-	if sessionMode == commands.SessionModeAsk {
-		return nil, errors.New("ask mode cannot create sub-agents")
-	}
-	if sessionMode == commands.SessionModePlan && !permission.IsSubAgentSafeInPlan() {
-		return nil, fmt.Errorf("plan mode cannot create agent with permission %q", permission)
-	}
-	if !isKnownPermissionMode(permission) {
-		return nil, fmt.Errorf("unsupported permission mode %q", permission)
+	permission, err := validateCreateAgentPermission(commands.SessionMode(mode), input.PermissionMode)
+	if err != nil {
+		return nil, err
 	}
 
 	definition := AgentDefinition{
@@ -220,12 +197,8 @@ func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input tools
 	}
 
 	agentName := strings.TrimSpace(input.AgentName)
-	if agentName == "" {
-		if sessionMode == commands.SessionModePlan {
-			agentName = AgentPlan
-		} else {
-			agentName = AgentExplore
-		}
+	if err := validateRunSubAgentRequest(sessionMode, agentName); err != nil {
+		return nil, err
 	}
 
 	r.mu.RLock()
@@ -361,6 +334,34 @@ func isKnownPermissionMode(mode PermissionMode) bool {
 	default:
 		return false
 	}
+}
+
+func validateCreateAgentPermission(sessionMode commands.SessionMode, rawPermission string) (PermissionMode, error) {
+	permissionText := strings.TrimSpace(rawPermission)
+	if permissionText == "" {
+		return "", errors.New("permission_mode is required")
+	}
+	permission := PermissionMode(permissionText)
+	if sessionMode == commands.SessionModeAsk {
+		return "", errors.New("ask mode cannot create sub-agents")
+	}
+	if !isKnownPermissionMode(permission) {
+		return "", fmt.Errorf("unsupported permission mode %q", permission)
+	}
+	if sessionMode == commands.SessionModePlan && !permission.IsSubAgentSafeInPlan() {
+		return "", fmt.Errorf("plan mode cannot create agent with permission %q", permission)
+	}
+	return permission, nil
+}
+
+func validateRunSubAgentRequest(sessionMode commands.SessionMode, agentName string) error {
+	if sessionMode == commands.SessionModeAsk {
+		return errors.New("ask mode cannot run sub-agents")
+	}
+	if strings.TrimSpace(agentName) == "" {
+		return errors.New("agent_name is required")
+	}
+	return nil
 }
 
 func normalizeAgentName(name string) string {

@@ -139,9 +139,6 @@ func dispatchCommand(ctx context.Context, runtime *AgentRuntime, modeState *comm
 		stdoutStyle := terminal.StyleForWriter(os.Stdout)
 		fmt.Print(stdoutStyle.UserPrompt(fmt.Sprintf("Switched to %s mode.\n", modeState.Current())))
 		return nil
-	case commands.AgentCommandSubAgent:
-		// 运行子命令。
-		return runChatCommand(ctx, runtime, modeState.Current(), history, sessionStats, buildSubAgentDelegationPrompt(command.Prompt))
 	default:
 		// 不支持的命令类型。
 		return fmt.Errorf("unsupported command kind %d", command.Kind)
@@ -178,12 +175,6 @@ func runChatCommand(ctx context.Context, runtime *AgentRuntime, mode commands.Se
 		}
 	}
 	return nil
-}
-
-// buildSubAgentDelegationPrompt builds the prompt for subagent delegation.
-// buildSubAgentDelegationPrompt 构建子命令委托提示词。
-func buildSubAgentDelegationPrompt(task string) string {
-	return "请把下面任务委托给合适的 subagent。你可以先 list_agents，必要时 create_agent，然后 run_subagent。subagent 必须使用全新上下文，最终由你汇总结果。\n\nTask:\n" + strings.TrimSpace(task)
 }
 
 func writeStatsLine(writer io.Writer, stats *middlewares.ContextStats, maxContextTokens int, sessionTotalTokens int) {
