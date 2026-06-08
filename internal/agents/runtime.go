@@ -19,6 +19,7 @@ import (
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/prompts"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/security"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
@@ -33,6 +34,7 @@ type AgentRuntime struct {
 	registry         *AgentRegistry
 	runners          map[string]*adk.Runner
 	mainRunners      map[commands.SessionMode]*adk.Runner
+	sessionID        string
 	maxContextTokens int
 }
 
@@ -74,6 +76,10 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 	if err != nil {
 		return nil, fmt.Errorf("create agent registry: %w", err)
 	}
+	sessionID, err := security.NewSessionID()
+	if err != nil {
+		return nil, err
+	}
 
 	runtime := &AgentRuntime{
 		model:            model,
@@ -81,6 +87,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		registry:         registry,
 		runners:          make(map[string]*adk.Runner),
 		mainRunners:      make(map[commands.SessionMode]*adk.Runner),
+		sessionID:        sessionID,
 		maxContextTokens: cfg.Model.MaxContextTokens,
 	}
 
@@ -113,6 +120,15 @@ func (r *AgentRuntime) MaxContextTokens() int {
 		return 0
 	}
 	return r.maxContextTokens
+}
+
+// SessionID returns the audit correlation id for this runtime.
+// SessionID 返回该运行时的审计关联 ID。
+func (r *AgentRuntime) SessionID() string {
+	if r == nil {
+		return ""
+	}
+	return r.sessionID
 }
 
 // RunMain runs the main agent with shared conversation history in the selected mode.
