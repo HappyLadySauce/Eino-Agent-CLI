@@ -31,7 +31,7 @@ func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 	}
 
 	modeState := commands.NewModeState()
-	history := messages.NewMessages(runtime.MaxHistoryMessages())
+	history := messages.NewMessages()
 	prompts := scanPrompts(ctx, os.Stdin)
 
 	for {

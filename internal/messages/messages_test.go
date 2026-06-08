@@ -9,30 +9,30 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func TestMessagesAddTrimsNilMessagesAndReturnsCopy(t *testing.T) {
-	msgs := NewMessages(2)
+func TestMessagesAddSkipsNilMessagesAndReturnsCopy(t *testing.T) {
+	msgs := NewMessages()
 
 	if err := msgs.Add(nil, schema.UserMessage("first"), schema.UserMessage("second"), schema.UserMessage("third")); err != nil {
 		t.Fatalf("Add returned error: %v", err)
 	}
 
 	got := msgs.Get()
-	if len(got) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(got))
+	if len(got) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(got))
 	}
-	if got[0].Content != "second" || got[1].Content != "third" {
-		t.Fatalf("unexpected message content: got %q, %q", got[0].Content, got[1].Content)
+	if got[0].Content != "first" || got[1].Content != "second" || got[2].Content != "third" {
+		t.Fatalf("unexpected message content: got %q, %q, %q", got[0].Content, got[1].Content, got[2].Content)
 	}
 
 	got[0] = schema.UserMessage("mutated")
 	again := msgs.Get()
-	if again[0].Content != "second" {
+	if again[0].Content != "first" {
 		t.Fatalf("Get should return a defensive copy, got %q", again[0].Content)
 	}
 }
 
 func TestMessagesAddAllowsMessagesWithoutUsage(t *testing.T) {
-	msgs := NewMessages(4)
+	msgs := NewMessages()
 
 	if err := msgs.Add(schema.UserMessage("hello"), schema.AssistantMessage("world", nil)); err != nil {
 		t.Fatalf("Add returned error: %v", err)

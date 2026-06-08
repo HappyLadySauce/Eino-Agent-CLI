@@ -19,7 +19,7 @@ func TestWriteStatsLinePrintsCurrentTurnSummary(t *testing.T) {
 	writeStatsLine(&out, stats, 200)
 
 	got := out.String()
-	want := "Stats: elapsed=150ms prompt=3tokens completion=5tokens total=8tokens(4.00%) calls=1\n"
+	want := "Stats: elapsed=150ms prompt↑=3 completion↓=5 total=8(4.00%)\n"
 	if got != want {
 		t.Fatalf("stats line = %q, want %q", got, want)
 	}

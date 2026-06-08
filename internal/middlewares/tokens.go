@@ -2,19 +2,16 @@ package middlewares
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	tiktoken "github.com/pkoukk/tiktoken-go"
-)
 
-const fallbackEncoding = "cl100k_base"
+	messageutils "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/utils/messages"
+	tokenutils "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/utils/tokens"
+)
 
 type statsContextKey struct{}
 
@@ -122,99 +119,18 @@ func (s *TokenStats) Snapshot() TokenStatsSnapshot {
 	}
 }
 
-// TokenCounter estimates message and tool prompt tokens with a tiktoken encoding.
-// TokenCounter 使用 tiktoken encoding 估算消息和工具 prompt token。
-type TokenCounter struct {
-	encoding *tiktoken.Tiktoken
-}
-
-// NewTokenCounter creates a tokenizer-backed token counter.
-// NewTokenCounter 创建基于 tokenizer 的 token 计数器。
-func NewTokenCounter(modelName, tokenizerModel string) (*TokenCounter, error) {
-	name := strings.TrimSpace(tokenizerModel)
-	if name == "" {
-		name = strings.TrimSpace(modelName)
-	}
-
-	var encoding *tiktoken.Tiktoken
-	var err error
-	if name != "" {
-		encoding, err = tiktoken.EncodingForModel(name)
-	}
-	if encoding == nil || err != nil {
-		encoding, err = tiktoken.GetEncoding(fallbackEncoding)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &TokenCounter{encoding: encoding}, nil
-}
-
-// CountMessages estimates prompt tokens for messages and tool definitions.
-// CountMessages 估算消息和工具定义的 prompt token。
-func (c *TokenCounter) CountMessages(messages []*schema.Message, tools []*schema.ToolInfo) (int, error) {
-	if c == nil || c.encoding == nil {
-		return 0, errors.New("token counter is not initialized")
-	}
-
-	total := 0
-	for _, msg := range messages {
-		if msg == nil {
-			continue
-		}
-		total += 4
-		total += c.countText(string(msg.Role))
-		total += c.countText(msg.Name)
-		total += c.countText(msg.Content)
-		total += c.countText(msg.ReasoningContent)
-		total += c.countText(msg.ToolCallID)
-		total += c.countText(msg.ToolName)
-		for _, part := range msg.MultiContent {
-			total += c.countJSON(part)
-		}
-		for _, part := range msg.UserInputMultiContent {
-			total += c.countJSON(part)
-		}
-		for _, part := range msg.AssistantGenMultiContent {
-			total += c.countJSON(part)
-		}
-		for _, call := range msg.ToolCalls {
-			total += c.countJSON(call)
-		}
-	}
-	for _, tool := range tools {
-		total += c.countJSON(tool)
-	}
-	return total, nil
-}
-
-func (c *TokenCounter) countText(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(c.encoding.Encode(text, nil, nil))
-}
-
-func (c *TokenCounter) countJSON(value any) int {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return 0
-	}
-	return c.countText(string(data))
-}
-
 type tokenMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
 
 	config  TokenMiddlewareConfig
-	counter *TokenCounter
+	counter *tokenutils.TokenCounter
 }
 
 // NewTokenCountMiddleware creates a ChatModelAgent middleware for trimming and token accounting.
 // NewTokenCountMiddleware 创建用于消息裁剪与 token 统计的 ChatModelAgent middleware。
 func NewTokenCountMiddleware(config TokenMiddlewareConfig) (adk.ChatModelAgentMiddleware, error) {
 	normalizeTokenConfig(&config)
-	counter, err := NewTokenCounter(config.ModelName, config.TokenizerModel)
+	counter, err := tokenutils.NewTokenCounter(config.ModelName, config.TokenizerModel)
 	if err != nil {
 		return nil, err
 	}
@@ -242,17 +158,17 @@ func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *ad
 		return ctx, state, nil
 	}
 
-	messages := trimByMessageCount(state.Messages, m.config.MaxHistoryMessages)
+	messages := messageutils.TrimByMessageCount(state.Messages, m.config.MaxHistoryMessages)
 	budget := m.config.MaxContextTokens - m.config.MaxOutputTokens
 	if budget > 0 {
 		var err error
-		messages, err = trimByTokenBudget(messages, state.ToolInfos, budget, m.counter)
+		messages, err = messageutils.TrimByTokenBudget(messages, state.ToolInfos, budget, m.counter)
 		if err != nil {
 			return ctx, state, err
 		}
 	}
 
-	if sameMessageSlice(messages, state.Messages) {
+	if messageutils.SameMessageSlice(messages, state.Messages) {
 		return ctx, state, nil
 	}
 	trimmed := *state
@@ -262,7 +178,7 @@ func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *ad
 
 func (m *tokenMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	if stats := StatsFromContext(ctx); stats != nil {
-		stats.RecordUsage(latestAssistantUsage(state.Messages))
+		stats.RecordUsage(messageutils.LatestAssistantUsage(state.Messages))
 	}
 	return ctx, state, nil
 }
@@ -294,95 +210,4 @@ func (m *timedModel) Stream(ctx context.Context, input []*schema.Message, opts .
 		stats.RecordDuration(time.Since(start))
 	}
 	return stream, err
-}
-
-func trimByMessageCount(messages []*schema.Message, max int) []*schema.Message {
-	if max <= 0 || len(messages) <= max {
-		return messages
-	}
-
-	systemMessages := make([]*schema.Message, 0)
-	nonSystem := make([]*schema.Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg != nil && msg.Role == schema.System {
-			systemMessages = append(systemMessages, msg)
-			continue
-		}
-		nonSystem = append(nonSystem, msg)
-	}
-	if len(nonSystem) > max {
-		nonSystem = nonSystem[len(nonSystem)-max:]
-	}
-	trimmed := make([]*schema.Message, 0, len(systemMessages)+len(nonSystem))
-	trimmed = append(trimmed, systemMessages...)
-	trimmed = append(trimmed, nonSystem...)
-	return trimmed
-}
-
-func trimByTokenBudget(messages []*schema.Message, tools []*schema.ToolInfo, budget int, counter *TokenCounter) ([]*schema.Message, error) {
-	trimmed := append([]*schema.Message(nil), messages...)
-	for {
-		total, err := counter.CountMessages(trimmed, tools)
-		if err != nil {
-			return messages, err
-		}
-		if total <= budget {
-			return trimmed, nil
-		}
-
-		index := firstRemovableMessageIndex(trimmed)
-		if index < 0 {
-			return trimmed, nil
-		}
-		trimmed = append(trimmed[:index], trimmed[index+1:]...)
-	}
-}
-
-func firstRemovableMessageIndex(messages []*schema.Message) int {
-	latestUser := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i] != nil && messages[i].Role == schema.User {
-			latestUser = i
-			break
-		}
-	}
-	for i, msg := range messages {
-		if msg == nil {
-			return i
-		}
-		if msg.Role == schema.System {
-			continue
-		}
-		if i == latestUser {
-			continue
-		}
-		return i
-	}
-	return -1
-}
-
-func latestAssistantUsage(messages []*schema.Message) *schema.TokenUsage {
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg == nil || msg.Role != schema.Assistant {
-			continue
-		}
-		if msg.ResponseMeta == nil {
-			return nil
-		}
-		return msg.ResponseMeta.Usage
-	}
-	return nil
-}
-
-func sameMessageSlice(left, right []*schema.Message) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -9,25 +9,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func TestTokenCounterCountsTextAndToolMessages(t *testing.T) {
-	counter, err := NewTokenCounter("unknown-local-model", "")
-	if err != nil {
-		t.Fatalf("NewTokenCounter() error = %v", err)
-	}
-
-	tokens, err := counter.CountMessages([]*schema.Message{
-		schema.UserMessage("hello world"),
-		schema.ToolMessage("tool output", "tool-call-id"),
-		schema.AssistantMessage("", nil),
-	}, nil)
-	if err != nil {
-		t.Fatalf("CountMessages() error = %v", err)
-	}
-	if tokens <= 0 {
-		t.Fatalf("CountMessages() = %d, want positive token count", tokens)
-	}
-}
-
 func TestTokenMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
 	handler, err := NewTokenCountMiddleware(TokenMiddlewareConfig{
 		ModelName:          "unknown-local-model",
@@ -41,7 +22,7 @@ func TestTokenMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
 
 	state := &adk.ChatModelAgentState{
 		Messages: []*schema.Message{
-			schema.SystemMessage("keep this system message"),
+			schema.SystemMessage("system can be removed " + strings.Repeat("s ", 200)),
 			schema.UserMessage("old user " + strings.Repeat("x ", 200)),
 			schema.AssistantMessage("old assistant "+strings.Repeat("y ", 200), nil),
 			schema.UserMessage("latest user must remain"),
@@ -54,13 +35,10 @@ func TestTokenMiddlewareTrimsByMessageCountAndTokenBudget(t *testing.T) {
 	}
 
 	contents := messageContents(trimmed.Messages)
-	if !strings.Contains(contents, "keep this system message") {
-		t.Fatalf("trimmed messages missing system message: %q", contents)
-	}
 	if !strings.Contains(contents, "latest user must remain") {
 		t.Fatalf("trimmed messages missing latest user: %q", contents)
 	}
-	if strings.Contains(contents, "old user") || strings.Contains(contents, "old assistant") {
+	if strings.Contains(contents, "system can be removed") || strings.Contains(contents, "old user") || strings.Contains(contents, "old assistant") {
 		t.Fatalf("trimmed messages still contain old history: %q", contents)
 	}
 }

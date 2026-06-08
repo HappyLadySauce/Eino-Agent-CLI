@@ -9,13 +9,10 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-const DefaultMaxCount = 20
-
-// Message Manager, used to manage messages and automatically maintain message count.
-// 消息管理器，用于管理消息的添加和获取，并自动维护消息数量。
+// Message Manager, used to manage conversation history.
+// 消息管理器，用于管理会话历史。
 type Messages struct {
 	messages []*schema.Message
-	maxCount int
 }
 
 // AssistantStreamResult contains the materialized assistant response after streaming.
@@ -27,18 +24,14 @@ type AssistantStreamResult struct {
 }
 
 // NewMessages creates a new message manager.
-// 创建新的消息管理器。
-func NewMessages(maxCount int) *Messages {
-	if maxCount <= 0 {
-		maxCount = DefaultMaxCount
-	}
+// NewMessages 创建新的消息管理器。
+func NewMessages() *Messages {
 	return &Messages{
 		messages: []*schema.Message{},
-		maxCount: maxCount,
 	}
 }
 
-// Add stores non-nil messages and keeps only the latest configured messages.
+// Add stores non-nil messages.
 // Parameters:
 //   - message: one or more schema messages to append.
 //
@@ -49,7 +42,7 @@ func NewMessages(maxCount int) *Messages {
 //
 //	msgs.Add(schema.UserMessage("hello"))
 //
-// Add 存储非空消息，并仅保留配置数量内的最新消息。
+// Add 存储非空消息。
 // 参数：
 //   - message：一个或多个待追加的 schema 消息。
 //
@@ -71,9 +64,6 @@ func (m *Messages) Add(message ...*schema.Message) error {
 		m.messages = append(m.messages, msg)
 	}
 
-	if len(m.messages) > m.maxCount {
-		m.messages = m.messages[len(m.messages)-m.maxCount:]
-	}
 	return nil
 }
 

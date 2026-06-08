@@ -28,13 +28,12 @@ import (
 type AgentRuntime struct {
 	mu sync.RWMutex
 
-	model              *openai.ChatModel
-	handlers           []adk.ChatModelAgentMiddleware
-	registry           *AgentRegistry
-	runners            map[string]*adk.Runner
-	mainRunners        map[commands.SessionMode]*adk.Runner
-	maxHistoryMessages int
-	maxContextTokens   int
+	model            *openai.ChatModel
+	handlers         []adk.ChatModelAgentMiddleware
+	registry         *AgentRegistry
+	runners          map[string]*adk.Runner
+	mainRunners      map[commands.SessionMode]*adk.Runner
+	maxContextTokens int
 }
 
 // NewAgentRuntime creates the model, built-in sub-agents, main agents, and runners.
@@ -77,13 +76,12 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 	}
 
 	runtime := &AgentRuntime{
-		model:              model,
-		handlers:           []adk.ChatModelAgentMiddleware{tokenMiddleware},
-		registry:           registry,
-		runners:            make(map[string]*adk.Runner),
-		mainRunners:        make(map[commands.SessionMode]*adk.Runner),
-		maxHistoryMessages: cfg.Model.MaxHistoryMessages,
-		maxContextTokens:   cfg.Model.MaxContextTokens,
+		model:            model,
+		handlers:         []adk.ChatModelAgentMiddleware{tokenMiddleware},
+		registry:         registry,
+		runners:          make(map[string]*adk.Runner),
+		mainRunners:      make(map[commands.SessionMode]*adk.Runner),
+		maxContextTokens: cfg.Model.MaxContextTokens,
 	}
 
 	for _, definition := range registry.List() {
@@ -115,15 +113,6 @@ func (r *AgentRuntime) Definitions() []AgentDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.registry.List()
-}
-
-// MaxHistoryMessages returns the configured conversation history limit.
-// MaxHistoryMessages 返回配置的对话历史限制。
-func (r *AgentRuntime) MaxHistoryMessages() int {
-	if r == nil {
-		return messages.DefaultMaxCount
-	}
-	return r.maxHistoryMessages
 }
 
 // MaxContextTokens returns the configured model context window size.
