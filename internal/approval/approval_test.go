@@ -8,7 +8,7 @@ import (
 
 func TestCLIPrompterApproveOnce(t *testing.T) {
 	var out strings.Builder
-	prompter := NewCLIPrompter(strings.NewReader("y\n"), &out)
+	prompter := NewCLIPrompter(NewStreamLineReader(strings.NewReader("y\n")), &out)
 	decision, err := prompter.Prompt(context.Background(), Request{ToolName: "run_command", Reason: "test"})
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)

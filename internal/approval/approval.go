@@ -1,7 +1,6 @@
 package approval
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -38,15 +37,15 @@ type Prompter interface {
 // CLIPropter implements interactive terminal approval.
 // CLIPropter 实现交互式终端审批。
 type CLIPropter struct {
-	reader *bufio.Reader
+	reader LineReader
 	writer io.Writer
 }
 
 // NewCLIPrompter creates a CLI approval prompter.
 // NewCLIPrompter 创建 CLI 审批器。
-func NewCLIPrompter(reader io.Reader, writer io.Writer) *CLIPropter {
+func NewCLIPrompter(reader LineReader, writer io.Writer) *CLIPropter {
 	return &CLIPropter{
-		reader: bufio.NewReader(reader),
+		reader: reader,
 		writer: writer,
 	}
 }
@@ -69,9 +68,12 @@ func (p *CLIPropter) Prompt(ctx context.Context, request Request) (Decision, err
 	if strings.TrimSpace(request.Input) != "" {
 		fmt.Fprintf(p.writer, "Input: %s\n", request.Input)
 	}
+	p.reader.BeginApproval()
+	defer p.reader.EndApproval()
+
 	fmt.Fprintf(p.writer, "Risk: %s\nReason: %s\nDecision: approve once? [y/N] ", request.Risk, request.Reason)
-	line, err := p.reader.ReadString('\n')
-	if err != nil && err != io.EOF {
+	line, err := p.reader.ReadApprovalLine(ctx)
+	if err != nil {
 		return DecisionDeny, fmt.Errorf("read approval decision: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(line)) {

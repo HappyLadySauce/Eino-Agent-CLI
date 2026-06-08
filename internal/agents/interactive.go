@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/approval"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
@@ -77,7 +78,8 @@ func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 		return errors.New("context is required")
 	}
 
-	runtime, err := NewAgentRuntime(ctx, cfg)
+	inputRouter := NewInputRouter(ctx, os.Stdin)
+	runtime, err := NewAgentRuntime(ctx, cfg, approval.NewCLIPrompter(inputRouter, os.Stdout))
 	if err != nil {
 		return fmt.Errorf("create agent runtime: %w", err)
 	}
@@ -85,7 +87,7 @@ func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 	modeState := commands.NewModeState()
 	history := messages.NewMessages()
 	sessionStats := &sessionTokenStats{}
-	prompts := scanPrompts(ctx, os.Stdin)
+	prompts := inputRouter.ChatPrompts()
 	stdoutStyle := terminal.StyleForWriter(os.Stdout)
 
 	for {

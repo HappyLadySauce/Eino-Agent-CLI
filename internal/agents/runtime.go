@@ -53,7 +53,7 @@ type AgentRuntime struct {
 
 // NewAgentRuntime creates the model, dynamic agent registry, main agents, and runners.
 // NewAgentRuntime 创建模型、动态 Agent 注册表、主 Agent 与 Runner。
-func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, error) {
+func NewAgentRuntime(ctx context.Context, cfg *config.Config, prompter approval.Prompter) (*AgentRuntime, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
@@ -132,7 +132,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		dataDir:          dataDir,
 		sandboxMode:      security.SandboxMode(cfg.Security.SandboxMode),
 		approvalMode:     security.ApprovalMode(cfg.Security.ApprovalMode),
-		prompter:         approval.NewCLIPrompter(os.Stdin, os.Stdout),
+		prompter:         prompter,
 		auditSink:        auditSink,
 		ruleSet:          ruleSet,
 		rateLimiter:      security.NewRateLimiter(),

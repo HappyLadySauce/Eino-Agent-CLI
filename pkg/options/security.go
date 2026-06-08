@@ -14,9 +14,9 @@ import (
 // SecurityOptions stores sandbox and approval configuration.
 // SecurityOptions 存储沙箱和审批配置。
 type SecurityOptions struct {
-	SandboxMode  string `mapstructure:"sandbox-mode"`
-	ApprovalMode string `mapstructure:"approval-mode"`
-	DataDir      string `mapstructure:"data-dir"`
+	SandboxMode  string `mapstructure:"EINO_SANDBOX_MODE"`
+	ApprovalMode string `mapstructure:"EINO_APPROVAL_MODE"`
+	DataDir      string `mapstructure:"EINO_DATA_DIR"`
 }
 
 // NewSecurityOptions creates default security options.
