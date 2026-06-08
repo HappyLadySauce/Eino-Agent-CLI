@@ -47,6 +47,23 @@ func TestTrimByTokenBudgetKeepsLatestUserWithoutProtectingSystem(t *testing.T) {
 	}
 }
 
+func TestTrimByTokenBudgetErrorsWhenLatestUserStillExceedsBudget(t *testing.T) {
+	counter, err := tokenutils.NewTokenCounter("unknown-local-model", "")
+	if err != nil {
+		t.Fatalf("NewTokenCounter() error = %v", err)
+	}
+
+	_, err = TrimByTokenBudget([]*schema.Message{
+		schema.UserMessage("latest user must remain " + strings.Repeat("x ", 100)),
+	}, nil, 1, counter)
+	if err == nil {
+		t.Fatal("TrimByTokenBudget() error = nil, want budget exceeded error")
+	}
+	if !strings.Contains(err.Error(), "message token budget exceeded after trimming") {
+		t.Fatalf("TrimByTokenBudget() error = %q, want budget exceeded message", err)
+	}
+}
+
 func TestLatestAssistantUsageReturnsLatestAssistantUsage(t *testing.T) {
 	first := schema.AssistantMessage("first", nil)
 	first.ResponseMeta = &schema.ResponseMeta{Usage: &schema.TokenUsage{TotalTokens: 3}}

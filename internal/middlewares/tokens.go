@@ -29,6 +29,7 @@ type TokenMiddlewareConfig struct {
 // TokenStatsSnapshot 是单轮用户请求模型使用情况的不可变快照。
 type TokenStatsSnapshot struct {
 	PromptTokens     int
+	MaxPromptTokens  int
 	CompletionTokens int
 	TotalTokens      int
 	CallCount        int
@@ -42,6 +43,7 @@ type TokenStats struct {
 
 	start            time.Time
 	promptTokens     int
+	maxPromptTokens  int
 	completionTokens int
 	totalTokens      int
 	callCount        int
@@ -82,6 +84,9 @@ func (s *TokenStats) RecordUsage(usage *schema.TokenUsage) {
 		return
 	}
 	s.promptTokens += usage.PromptTokens
+	if usage.PromptTokens > s.maxPromptTokens {
+		s.maxPromptTokens = usage.PromptTokens
+	}
 	s.completionTokens += usage.CompletionTokens
 	s.totalTokens += usage.TotalTokens
 }
@@ -112,6 +117,7 @@ func (s *TokenStats) Snapshot() TokenStatsSnapshot {
 	}
 	return TokenStatsSnapshot{
 		PromptTokens:     s.promptTokens,
+		MaxPromptTokens:  s.maxPromptTokens,
 		CompletionTokens: s.completionTokens,
 		TotalTokens:      s.totalTokens,
 		CallCount:        s.callCount,
@@ -159,7 +165,7 @@ func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *ad
 	}
 
 	messages := messageutils.TrimByMessageCount(state.Messages, m.config.MaxHistoryMessages)
-	budget := m.config.MaxContextTokens - m.config.MaxOutputTokens
+	budget := promptTokenBudget(m.config.MaxContextTokens, m.config.MaxOutputTokens)
 	if budget > 0 {
 		var err error
 		messages, err = messageutils.TrimByTokenBudget(messages, state.ToolInfos, budget, m.counter)
@@ -174,6 +180,32 @@ func (m *tokenMiddleware) BeforeModelRewriteState(ctx context.Context, state *ad
 	trimmed := *state
 	trimmed.Messages = messages
 	return ctx, &trimmed, nil
+}
+
+// promptTokenBudget reserves output and estimation safety margin from the context window.
+// promptTokenBudget 从上下文窗口中扣除输出预算和估算安全余量。
+func promptTokenBudget(maxContextTokens, maxOutputTokens int) int {
+	budget := maxContextTokens - maxOutputTokens
+	if budget <= 0 {
+		return budget
+	}
+	return budget - promptBudgetSafetyMargin(budget)
+}
+
+// promptBudgetSafetyMargin returns a bounded margin for tokenizer/provider drift.
+// promptBudgetSafetyMargin 返回用于覆盖 tokenizer/provider 误差的有界安全余量。
+func promptBudgetSafetyMargin(budget int) int {
+	if budget <= 0 {
+		return 0
+	}
+	margin := budget / 20
+	if margin < 128 {
+		return margin
+	}
+	if margin > 2048 {
+		return 2048
+	}
+	return margin
 }
 
 func (m *tokenMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {

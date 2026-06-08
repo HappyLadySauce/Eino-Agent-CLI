@@ -109,8 +109,33 @@ func TestTokenStatsRecordsUsageAndCallCount(t *testing.T) {
 	if snapshot.PromptTokens != 11 || snapshot.CompletionTokens != 7 || snapshot.TotalTokens != 18 {
 		t.Fatalf("snapshot tokens = %#v, want prompt=11 completion=7 total=18", snapshot)
 	}
+	if snapshot.MaxPromptTokens != 11 {
+		t.Fatalf("MaxPromptTokens = %d, want 11", snapshot.MaxPromptTokens)
+	}
 	if snapshot.CallCount != 2 {
 		t.Fatalf("CallCount = %d, want 2", snapshot.CallCount)
+	}
+}
+
+func TestTokenStatsRecordsMaxPromptAcrossModelCalls(t *testing.T) {
+	stats := &TokenStats{}
+
+	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18})
+	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 29, CompletionTokens: 5, TotalTokens: 34})
+	stats.RecordUsage(&schema.TokenUsage{PromptTokens: 17, CompletionTokens: 3, TotalTokens: 20})
+
+	snapshot := stats.Snapshot()
+	if snapshot.PromptTokens != 57 || snapshot.MaxPromptTokens != 29 {
+		t.Fatalf("snapshot prompt tokens = %#v, want sum=57 max=29", snapshot)
+	}
+}
+
+func TestPromptTokenBudgetReservesSafetyMargin(t *testing.T) {
+	if got, want := promptTokenBudget(128000, 32000), 93952; got != want {
+		t.Fatalf("promptTokenBudget() = %d, want %d", got, want)
+	}
+	if got, want := promptTokenBudget(80, 16), 61; got != want {
+		t.Fatalf("promptTokenBudget() small budget = %d, want %d", got, want)
 	}
 }
 

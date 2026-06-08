@@ -281,7 +281,7 @@ func consumeMessage(msg *schema.Message, writer *channelWriter, reply *strings.B
 }
 
 func writeAssistantContent(writer *channelWriter, reply *strings.Builder, content string) (bool, error) {
-	if content == "" {
+	if strings.TrimSpace(content) == "" {
 		return false, nil
 	}
 
@@ -351,10 +351,11 @@ func formatToolCall(toolCall schema.ToolCall) string {
 	if name == "" {
 		name = toolCall.ID
 	}
-	if toolCall.Function.Arguments == "" {
+	args := strings.TrimSpace(toolCall.Function.Arguments)
+	if args == "" || args == "{}" {
 		return name
 	}
-	return fmt.Sprintf("%s %s", name, toolCall.Function.Arguments)
+	return fmt.Sprintf("%s %s", name, args)
 }
 
 func formatToolResult(msg *schema.Message) string {

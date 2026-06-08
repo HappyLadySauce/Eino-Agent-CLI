@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"fmt"
+
 	"github.com/cloudwego/eino/schema"
 
 	tokenutils "github.com/HappyLadySauce/Eino-Agent-CLI/pkg/utils/tokens"
@@ -30,7 +32,7 @@ func TrimByTokenBudget(messages []*schema.Message, tools []*schema.ToolInfo, bud
 
 		index := firstRemovableMessageIndex(trimmed)
 		if index < 0 {
-			return trimmed, nil
+			return trimmed, fmt.Errorf("message token budget exceeded after trimming: estimated=%d budget=%d", total, budget)
 		}
 		trimmed = append(trimmed[:index], trimmed[index+1:]...)
 	}

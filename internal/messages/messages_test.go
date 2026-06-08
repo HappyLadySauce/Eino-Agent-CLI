@@ -115,6 +115,41 @@ func TestConsumeAssistantStreamSeparatesThinkingToolsAndFinalContent(t *testing.
 	}
 }
 
+func TestConsumeAssistantStreamSkipsBlankAssistantContentBeforeToolCall(t *testing.T) {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	stream := schema.StreamReaderFromArray([]*schema.Message{
+		{Role: schema.Assistant, ReasoningContent: "checking tools\n\n"},
+		schema.AssistantMessage("\n\n", []schema.ToolCall{
+			{
+				ID:   "call-1",
+				Type: "function",
+				Function: schema.FunctionCall{
+					Name:      "list_agents",
+					Arguments: `{}`,
+				},
+			},
+		}),
+	})
+
+	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
+	gen.Send(adk.EventFromMessage(schema.ToolMessage("tool output", "call-1", schema.WithToolName("list_agents")), nil, schema.Tool, "list_agents"))
+	gen.Close()
+
+	var out bytes.Buffer
+	result, err := ConsumeAssistantStream(iter, &out)
+	if err != nil {
+		t.Fatalf("ConsumeAssistantStream returned error: %v", err)
+	}
+
+	if result.Content != "" {
+		t.Fatalf("expected empty final content, got %q", result.Content)
+	}
+	wantOutput := "Assistant[thinking]> checking tools\n\n\nAssistant[tools]> list_agents\nAssistant[tools]> list_agents: tool output\n"
+	if out.String() != wantOutput {
+		t.Fatalf("unexpected output:\ngot:  %q\nwant: %q", out.String(), wantOutput)
+	}
+}
+
 func TestConsumeAssistantStreamRoutesLeakedThoughtChannelToThinking(t *testing.T) {
 	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	stream := schema.StreamReaderFromArray([]*schema.Message{
