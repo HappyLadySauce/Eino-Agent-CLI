@@ -47,7 +47,7 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 			// 在标志与配置全部就绪后校验选项。
 			if err := opts.Validate(); err != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "Configuration file: %s\n", opts.ConfigPath())
-				return fmt.Errorf("configuration incomplete: %w", err)
+				return fmt.Errorf("configuration incomplete:\n%w", err)
 			}
 			return run(cmd.Context(), opts)
 		},
