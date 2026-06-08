@@ -9,12 +9,12 @@ import (
 // Context is the immutable security context shared by one session.
 // Context 是单个会话共享的不可变安全上下文。
 type Context struct {
-	SessionID     string			// 会话ID
-	WorkspaceRoot string			// 工作区根目录
-	DataDir       string			// 数据目录
-	SessionMode   SessionMode		// 会话模式
-	SandboxMode   SandboxMode		// 沙箱模式
-	ApprovalMode  ApprovalMode		// 审批模式
+	SessionID     string       // 会话ID
+	WorkspaceRoot string       // 工作区根目录
+	DataDir       string       // 数据目录
+	SessionMode   SessionMode  // 会话模式
+	SandboxMode   SandboxMode  // 沙箱模式
+	ApprovalMode  ApprovalMode // 审批模式
 }
 
 // Validate checks that the context is complete and internally consistent.

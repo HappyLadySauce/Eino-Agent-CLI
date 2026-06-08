@@ -12,10 +12,10 @@ import (
 // ResolvedPath is the canonical path view used for boundary checks.
 // ResolvedPath 是用于边界检查的规范化路径视图。
 type ResolvedPath struct {
-	WorkspaceRoot string		// 工作区根目录
-	Requested     string		// 请求路径
-	Absolute      string		// 绝对路径
-	Existing      bool			// 是否存在
+	WorkspaceRoot string // 工作区根目录
+	Requested     string // 请求路径
+	Absolute      string // 绝对路径
+	Existing      bool   // 是否存在
 }
 
 // ResolveWorkspacePath resolves a requested path and verifies workspace containment.

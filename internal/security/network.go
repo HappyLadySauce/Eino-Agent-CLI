@@ -9,12 +9,12 @@ import (
 // NetworkPolicy defines network access metadata for future enforcement.
 // NetworkPolicy 定义未来网络访问控制所需的元数据。
 type NetworkPolicy struct {
-	DefaultDecision Decision		// 默认决策
-	AllowedDomains  []string		// 允许的域名
-	DeniedDomains   []string		// 拒绝的域名
-	AllowedPorts    []int			// 允许的端口
-	DeniedPorts     []int			// 拒绝的端口
-	AllowPrivateIPs bool			// 是否允许私有IP
+	DefaultDecision Decision // 默认决策
+	AllowedDomains  []string // 允许的域名
+	DeniedDomains   []string // 拒绝的域名
+	AllowedPorts    []int    // 允许的端口
+	DeniedPorts     []int    // 拒绝的端口
+	AllowPrivateIPs bool     // 是否允许私有IP
 }
 
 // NormalizeHostname extracts a normalized hostname from a URL or host string.

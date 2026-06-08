@@ -1,3 +1,11 @@
 .vscode/
 
 history.json
+
+# Local secrets loaded by Makefile (-include .env)
+.env
+
+# Build artifacts
+bin/
+coverage.out
+coverage.html

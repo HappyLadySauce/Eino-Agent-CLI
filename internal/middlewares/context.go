@@ -18,22 +18,22 @@ type statsContextKey struct{}
 // ContextMiddlewareConfig configures per-call message trimming against the model context window.
 // ContextMiddlewareConfig 配置每次模型调用前的消息裁剪与上下文窗口预算。
 type ContextMiddlewareConfig struct {
-	ModelName          string	// 模型名称
-	TokenizerModel     string	// 分词器模型名称
-	MaxContextTokens   int	// 最大上下文窗口大小
-	MaxOutputTokens    int	// 最大输出窗口大小
-	MaxHistoryMessages int	// 最大历史消息数量
+	ModelName          string // 模型名称
+	TokenizerModel     string // 分词器模型名称
+	MaxContextTokens   int    // 最大上下文窗口大小
+	MaxOutputTokens    int    // 最大输出窗口大小
+	MaxHistoryMessages int    // 最大历史消息数量
 }
 
 // ContextStatsSnapshot is an immutable view of accumulated context window usage for one user turn.
 // ContextStatsSnapshot 是单轮用户请求模型上下文窗口使用情况的不可变快照。
 type ContextStatsSnapshot struct {
-	PromptTokens     int	// 模型输入提示词 token 数量
-	MaxPromptTokens  int	// 最大模型输入提示词 token 数量
-	CompletionTokens int	// 模型输出完成词 token 数量
-	TotalTokens      int	// 总 token 数量
-	CallCount        int	// 调用次数
-	Duration         time.Duration	// 模型调用耗时
+	PromptTokens     int           // 模型输入提示词 token 数量
+	MaxPromptTokens  int           // 最大模型输入提示词 token 数量
+	CompletionTokens int           // 模型输出完成词 token 数量
+	TotalTokens      int           // 总 token 数量
+	CallCount        int           // 调用次数
+	Duration         time.Duration // 模型调用耗时
 }
 
 // ContextStats accumulates context window usage for the current user turn.
@@ -42,12 +42,12 @@ type ContextStats struct {
 	mu sync.RWMutex
 
 	start            time.Time
-	promptTokens     int	// 模型输入提示词 token 数量
-	maxPromptTokens  int	// 最大提示词 token 数量
-	completionTokens int	// 模型输出完成词 token 数量
-	totalTokens      int	// 总 token 数量
-	callCount        int	// 调用次数
-	duration         time.Duration	// 模型调用耗时
+	promptTokens     int           // 模型输入提示词 token 数量
+	maxPromptTokens  int           // 最大提示词 token 数量
+	completionTokens int           // 模型输出完成词 token 数量
+	totalTokens      int           // 总 token 数量
+	callCount        int           // 调用次数
+	duration         time.Duration // 模型调用耗时
 }
 
 // NewStatsContext attaches a fresh context stats accumulator to ctx.

@@ -9,13 +9,13 @@ import (
 // CommandClassification is the security view of one command string.
 // CommandClassification 是单条命令字符串的安全视图。
 type CommandClassification struct {
-	Tokens      []string		// 令牌
-	Simple      bool			// 是否简单
-	Risk        OperationRisk	// 风险等级
-	ReadOnly    bool			// 是否只读
-	Network     bool			// 是否网络访问
-	WritesFiles bool			// 是否写文件
-	Reasons     []string		// 原因
+	Tokens      []string      // 令牌
+	Simple      bool          // 是否简单
+	Risk        OperationRisk // 风险等级
+	ReadOnly    bool          // 是否只读
+	Network     bool          // 是否网络访问
+	WritesFiles bool          // 是否写文件
+	Reasons     []string      // 原因
 }
 
 // ClassifyCommand classifies a shell command using syntax, executable, and argument risk.
