@@ -17,8 +17,9 @@ import (
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/prompts"
-	agenttools "github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 )
 
 // AgentRuntime owns ADK agents, runners, tools, and orchestration settings.
@@ -29,7 +30,7 @@ type AgentRuntime struct {
 	model              *openai.ChatModel
 	registry           *AgentRegistry
 	runners            map[string]*adk.Runner
-	mainRunners        map[SessionMode]*adk.Runner
+	mainRunners        map[commands.SessionMode]*adk.Runner
 	maxHistoryMessages int
 }
 
@@ -61,7 +62,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		model:              model,
 		registry:           registry,
 		runners:            make(map[string]*adk.Runner),
-		mainRunners:        make(map[SessionMode]*adk.Runner),
+		mainRunners:        make(map[commands.SessionMode]*adk.Runner),
 		maxHistoryMessages: cfg.Model.MaxOutputTokens,
 	}
 
@@ -74,7 +75,7 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		}
 	}
 
-	for _, mode := range []SessionMode{SessionModeAgents, SessionModePlan, SessionModeAsk} {
+	for _, mode := range []commands.SessionMode{commands.SessionModeAgent, commands.SessionModePlan, commands.SessionModeAsk} {
 		runner, err := runtime.newMainRunner(ctx, mode)
 		if err != nil {
 			return nil, fmt.Errorf("create main agent for mode %q: %w", mode, err)
@@ -107,7 +108,7 @@ func (r *AgentRuntime) MaxHistoryMessages() int {
 
 // RunMain runs the main agent with shared conversation history in the selected mode.
 // RunMain 在指定模式下使用共享对话历史运行主 Agent。
-func (r *AgentRuntime) RunMain(ctx context.Context, mode SessionMode, history []*schema.Message, writer io.Writer) (*messages.AssistantStreamResult, error) {
+func (r *AgentRuntime) RunMain(ctx context.Context, mode commands.SessionMode, history []*schema.Message, writer io.Writer) (*messages.AssistantStreamResult, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
@@ -129,7 +130,7 @@ func (r *AgentRuntime) RunMain(ctx context.Context, mode SessionMode, history []
 
 // CreateAgent creates and registers a dynamic sub-agent.
 // CreateAgent 创建并注册动态子 Agent。
-func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input agenttools.CreateAgentInput) (*agenttools.CreateAgentOutput, error) {
+func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input tools.CreateAgentInput) (*tools.CreateAgentOutput, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
@@ -137,19 +138,19 @@ func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input agent
 		return nil, errors.New("agent runtime is nil")
 	}
 
-	sessionMode := SessionMode(mode)
+	sessionMode := commands.SessionMode(mode)
 	permission := PermissionMode(strings.TrimSpace(input.PermissionMode))
 	if permission == "" {
-		if sessionMode == SessionModePlan {
+		if sessionMode == commands.SessionModePlan {
 			permission = PermissionModePlan
 		} else {
 			permission = PermissionModeReadonly
 		}
 	}
-	if sessionMode == SessionModeAsk {
+	if sessionMode == commands.SessionModeAsk {
 		return nil, errors.New("ask mode cannot create sub-agents")
 	}
-	if sessionMode == SessionModePlan && !permission.IsSubAgentSafeInPlan() {
+	if sessionMode == commands.SessionModePlan && !permission.IsSubAgentSafeInPlan() {
 		return nil, fmt.Errorf("plan mode cannot create agent with permission %q", permission)
 	}
 	if !isKnownPermissionMode(permission) {
@@ -174,7 +175,7 @@ func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input agent
 		return nil, fmt.Errorf("create dynamic agent runner: %w", err)
 	}
 
-	return &agenttools.CreateAgentOutput{
+	return &tools.CreateAgentOutput{
 		Name:           definition.Name,
 		Description:    definition.Description,
 		PermissionMode: string(definition.PermissionMode),
@@ -184,7 +185,7 @@ func (r *AgentRuntime) CreateAgent(ctx context.Context, mode string, input agent
 
 // RunSubAgent runs a sub-agent with a fresh isolated context and returns only the final result.
 // RunSubAgent 使用全新隔离上下文运行子 Agent，并仅返回最终结果。
-func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agenttools.RunSubAgentInput) (*agenttools.RunSubAgentOutput, error) {
+func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input tools.RunSubAgentInput) (*tools.RunSubAgentOutput, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
@@ -195,14 +196,14 @@ func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agent
 	if task == "" {
 		return nil, errors.New("sub-agent task is required")
 	}
-	sessionMode := SessionMode(mode)
-	if sessionMode == SessionModeAsk {
+	sessionMode := commands.SessionMode(mode)
+	if sessionMode == commands.SessionModeAsk {
 		return nil, errors.New("ask mode cannot run sub-agents")
 	}
 
 	agentName := strings.TrimSpace(input.AgentName)
 	if agentName == "" {
-		if sessionMode == SessionModePlan {
+		if sessionMode == commands.SessionModePlan {
 			agentName = AgentPlan
 		} else {
 			agentName = AgentExplore
@@ -219,7 +220,7 @@ func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agent
 	if runner == nil {
 		return nil, fmt.Errorf("agent runner %q is not initialized", agentName)
 	}
-	if sessionMode == SessionModePlan && !definition.PermissionMode.IsSubAgentSafeInPlan() {
+	if sessionMode == commands.SessionModePlan && !definition.PermissionMode.IsSubAgentSafeInPlan() {
 		return nil, fmt.Errorf("plan mode cannot run agent %q with permission %q", agentName, definition.PermissionMode)
 	}
 
@@ -233,7 +234,7 @@ func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agent
 	if err != nil {
 		return nil, fmt.Errorf("consume sub-agent %q result: %w", agentName, err)
 	}
-	return &agenttools.RunSubAgentOutput{
+	return &tools.RunSubAgentOutput{
 		AgentName:  agentName,
 		Content:    result.Content,
 		Created:    definition.Dynamic,
@@ -245,21 +246,21 @@ func (r *AgentRuntime) RunSubAgent(ctx context.Context, mode string, input agent
 
 // ListAgents returns the current built-in and dynamic agents.
 // ListAgents 返回当前内置与动态 Agent。
-func (r *AgentRuntime) ListAgents(_ context.Context, _ string, _ agenttools.ListAgentsInput) (*agenttools.ListAgentsOutput, error) {
+func (r *AgentRuntime) ListAgents(_ context.Context, _ string, _ tools.ListAgentsInput) (*tools.ListAgentsOutput, error) {
 	if r == nil {
 		return nil, errors.New("agent runtime is nil")
 	}
 	definitions := r.Definitions()
-	agents := make([]agenttools.AgentSummary, 0, len(definitions))
+	agents := make([]tools.AgentSummary, 0, len(definitions))
 	for _, definition := range definitions {
-		agents = append(agents, agenttools.AgentSummary{
+		agents = append(agents, tools.AgentSummary{
 			Name:           definition.Name,
 			Description:    definition.Description,
 			PermissionMode: string(definition.PermissionMode),
 			Dynamic:        definition.Dynamic,
 		})
 	}
-	return &agenttools.ListAgentsOutput{Agents: agents}, nil
+	return &tools.ListAgentsOutput{Agents: agents}, nil
 }
 
 func (r *AgentRuntime) createRunnerLocked(ctx context.Context, definition AgentDefinition) error {
@@ -274,7 +275,7 @@ func (r *AgentRuntime) createRunnerLocked(ctx context.Context, definition AgentD
 	return nil
 }
 
-func (r *AgentRuntime) newMainRunner(ctx context.Context, mode SessionMode) (*adk.Runner, error) {
+func (r *AgentRuntime) newMainRunner(ctx context.Context, mode commands.SessionMode) (*adk.Runner, error) {
 	definition := AgentDefinition{
 		Name:           string(mode) + "-main",
 		Description:    "Main CLI agent for " + string(mode) + " mode.",
@@ -283,7 +284,7 @@ func (r *AgentRuntime) newMainRunner(ctx context.Context, mode SessionMode) (*ad
 	}
 
 	var tools []tool.BaseTool
-	if mode == SessionModeAgents || mode == SessionModePlan {
+	if mode == commands.SessionModeAgent || mode == commands.SessionModePlan {
 		var err error
 		tools, err = r.agentToolsForMode(mode)
 		if err != nil {
@@ -301,8 +302,8 @@ func (r *AgentRuntime) newMainRunner(ctx context.Context, mode SessionMode) (*ad
 	}), nil
 }
 
-func (r *AgentRuntime) agentToolsForMode(mode SessionMode) ([]tool.BaseTool, error) {
-	return agenttools.NewAgentTools(string(mode), r)
+func (r *AgentRuntime) agentToolsForMode(mode commands.SessionMode) ([]tool.BaseTool, error) {
+	return tools.NewAgentTools(string(mode), r)
 }
 
 func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition AgentDefinition, tools []tool.BaseTool) (*adk.ChatModelAgent, error) {

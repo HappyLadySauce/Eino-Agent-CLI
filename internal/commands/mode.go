@@ -1,4 +1,4 @@
-package agents
+package commands
 
 import "fmt"
 
@@ -11,14 +11,14 @@ type ModeState struct {
 // NewModeState creates a mode state using Agent mode by default.
 // NewModeState 创建默认使用 Agent 模式的模式状态。
 func NewModeState() *ModeState {
-	return &ModeState{current: SessionModeAgents}
+	return &ModeState{current: SessionModeAgent}
 }
 
 // Current returns the active session mode.
 // Current 返回当前会话模式。
 func (s *ModeState) Current() SessionMode {
 	if s == nil || s.current == "" {
-		return SessionModeAgents
+		return SessionModeAgent
 	}
 	return s.current
 }
@@ -30,7 +30,7 @@ func (s *ModeState) Switch(mode SessionMode) error {
 		return fmt.Errorf("mode state is nil")
 	}
 	switch mode {
-	case SessionModeAgents, SessionModePlan, SessionModeAsk:
+	case SessionModeAgent, SessionModePlan, SessionModeAsk:
 		s.current = mode
 		return nil
 	default:

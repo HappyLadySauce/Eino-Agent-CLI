@@ -1,4 +1,4 @@
-package agents
+package commands
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 type SessionMode string
 
 const (
-	SessionModeAgents SessionMode = "agents"
+	SessionModeAgent SessionMode = "agent"
 	SessionModePlan   SessionMode = "plan"
 	SessionModeAsk    SessionMode = "ask"
 )
@@ -45,8 +45,8 @@ func ParseAgentCommand(input string) (AgentCommand, error) {
 	switch text {
 	case "exit", "quit":
 		return AgentCommand{Kind: AgentCommandExit}, nil
-	case "/agents":
-		return AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAgents}, nil
+	case "/agent":
+		return AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAgent}, nil
 	case "/plan":
 		return AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModePlan}, nil
 	case "/ask":

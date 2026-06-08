@@ -1,6 +1,8 @@
-package agents
+package commands
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestParseAgentCommand(t *testing.T) {
 	tests := []struct {
@@ -20,9 +22,9 @@ func TestParseAgentCommand(t *testing.T) {
 			want:  AgentCommand{Kind: AgentCommandExit},
 		},
 		{
-			name:  "agents mode",
-			input: "/agents",
-			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAgents},
+			name:  "agent mode",
+			input: "/agent",
+			want:  AgentCommand{Kind: AgentCommandModeSwitch, Mode: SessionModeAgent},
 		},
 		{
 			name:  "plan mode",
@@ -82,8 +84,8 @@ func TestParseAgentCommand(t *testing.T) {
 
 func TestModeState(t *testing.T) {
 	state := NewModeState()
-	if got := state.Current(); got != SessionModeAgents {
-		t.Fatalf("Current() = %q, want %q", got, SessionModeAgents)
+	if got := state.Current(); got != SessionModeAgent {
+		t.Fatalf("Current() = %q, want %q", got, SessionModeAgent)
 	}
 	if err := state.Switch(SessionModePlan); err != nil {
 		t.Fatalf("Switch(plan) error = %v", err)
