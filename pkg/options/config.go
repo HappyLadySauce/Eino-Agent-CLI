@@ -46,9 +46,10 @@ func init() {
 func AddConfigFlag(fs *pflag.FlagSet, basename string) {
 	fs.AddFlag(pflag.Lookup(configFlagName))
 
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix(strings.Replace(strings.ToUpper(basename), "-", "_", -1))
+	prefix := strings.Replace(strings.ToUpper(basename), "-", "_", -1)
+	viper.SetEnvPrefix(prefix)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	configureEnvBinding(prefix)
 
 	cobra.OnInitialize(func() {
 		if err := loadViperConfig(basename, cfgFile); err != nil {
@@ -56,6 +57,33 @@ func AddConfigFlag(fs *pflag.FlagSet, basename string) {
 			os.Exit(1)
 		}
 	})
+}
+
+// configureEnvBinding wires environment variables into Viper without flattening nested keys.
+// configureEnvBinding 将环境变量绑定到 Viper，避免嵌套配置键被压平。
+func configureEnvBinding(prefix string) {
+	// AutomaticEnv maps EINO_MODEL -> top-level "model" (string), which breaks unmarshaling
+	// of the nested model{} block from settings.json when EINO_MODEL is exported (e.g. from Make/.env).
+	// AutomaticEnv 会把 EINO_MODEL 映射为顶层 "model" 字符串，在 Makefile/.env 导出 EINO_MODEL 时
+	// 会破坏 settings.json 中 model{} 嵌套块的反序列化。
+	if prefix == "EINO" {
+		for configKey, envKey := range einoModelEnvBindings {
+			_ = viper.BindEnv(configKey, envKey)
+		}
+		return
+	}
+
+	viper.AutomaticEnv()
+}
+
+var einoModelEnvBindings = map[string]string{
+	"model.EINO_AUTH_TOKEN":           "EINO_AUTH_TOKEN",
+	"model.EINO_BASE_URL":             "EINO_BASE_URL",
+	"model.EINO_MODEL":                "EINO_MODEL",
+	"model.EINO_MAX_OUTPUT_TOKENS":    "EINO_MAX_OUTPUT_TOKENS",
+	"model.EINO_MAX_CONTEXT_TOKENS":   "EINO_MAX_CONTEXT_TOKENS",
+	"model.EINO_MAX_HISTORY_MESSAGES": "EINO_MAX_HISTORY_MESSAGES",
+	"model.EINO_TOKENIZER_MODEL":      "EINO_TOKENIZER_MODEL",
 }
 
 // loadViperConfig loads configuration with priority: --config > cwd > ~/basename/.

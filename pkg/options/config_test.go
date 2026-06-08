@@ -309,6 +309,56 @@ func TestAddConfigFlagAddsFlagToFlagSet(t *testing.T) {
 	}
 }
 
+// TestAddConfigFlagEINOModelEnvDoesNotFlattenModelSection ensures EINO_MODEL env does not replace model{} with a string.
+// TestAddConfigFlagEINOModelEnvDoesNotFlattenModelSection 确认 EINO_MODEL 环境变量不会把 model{} 压平成字符串。
+func TestAddConfigFlagEINOModelEnvDoesNotFlattenModelSection(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	content := `{
+		"model": {
+			"EINO_AUTH_TOKEN": "from-file",
+			"EINO_BASE_URL": "https://api.example.com",
+			"EINO_MODEL": "from-file-model",
+			"EINO_MAX_OUTPUT_TOKENS": 32000
+		}
+	}`
+	if err := os.WriteFile(settingsPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("os.Chdir() error = %v", err)
+	}
+
+	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
+	AddConfigFlag(fs, "eino")
+	t.Setenv("EINO_MODEL", "from-env-model")
+	t.Setenv("EINO_BASE_URL", "https://env.example.com")
+
+	if err := loadViperConfig("eino", ""); err != nil {
+		t.Fatalf("loadViperConfig() error = %v", err)
+	}
+
+	modelSection := viper.Get("model")
+	if _, ok := modelSection.(map[string]any); !ok {
+		t.Fatalf("viper.Get(model) = %T (%v), want map[string]any", modelSection, modelSection)
+	}
+	if got, want := viper.GetString("model.EINO_MODEL"), "from-env-model"; got != want {
+		t.Errorf("viper.GetString(model.EINO_MODEL) = %q, want %q", got, want)
+	}
+	if got, want := viper.GetString("model.EINO_BASE_URL"), "https://env.example.com"; got != want {
+		t.Errorf("viper.GetString(model.EINO_BASE_URL) = %q, want %q", got, want)
+	}
+}
+
 // TestAddConfigFlagBindsEnvWithBasenamePrefix checks env prefix and key replacer for hyphenated basenames.
 // TestAddConfigFlagBindsEnvWithBasenamePrefix 校验带连字符 basename 的环境变量前缀与键替换。
 func TestAddConfigFlagBindsEnvWithBasenamePrefix(t *testing.T) {
