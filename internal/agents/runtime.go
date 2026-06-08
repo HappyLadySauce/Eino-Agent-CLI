@@ -138,9 +138,6 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		rateLimiter:      security.NewRateLimiter(),
 		maxContextTokens: cfg.Model.MaxContextTokens,
 	}
-	if err := tools.SaveSessionMetadata(runtime.securityContextForMode(commands.SessionModeAgent)); err != nil {
-		return nil, err
-	}
 
 	for _, mode := range []commands.SessionMode{commands.SessionModeAgent, commands.SessionModePlan, commands.SessionModeAsk} {
 		runner, err := runtime.newMainRunner(ctx, mode)

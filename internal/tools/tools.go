@@ -10,7 +10,6 @@ import (
 	commandtools "github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools/command"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools/core"
 	filetools "github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools/file"
-	sessiontools "github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools/session"
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/approval"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/audit"
@@ -54,10 +53,6 @@ type AgentSummary = agenttools.AgentSummary
 // ListAgentsOutput 向主 Agent 返回可用 Agent。
 type ListAgentsOutput = agenttools.ListAgentsOutput
 
-// SessionMetadata is the persisted minimal session metadata.
-// SessionMetadata 是持久化的最小会话元数据。
-type SessionMetadata = sessiontools.Metadata
-
 // NewAgentTools creates all main-agent tools for the given session mode.
 // NewAgentTools 为指定会话模式创建主 Agent 工具集合。
 func NewAgentTools(mode string, service AgentToolService) ([]einotool.BaseTool, error) {
@@ -82,24 +77,11 @@ func NewSecureAgentTools(mode string, service AgentToolService, opts SecureToolO
 	definitions = append(definitions, agenttools.Definitions()...)
 	definitions = append(definitions, filetools.Definitions()...)
 	definitions = append(definitions, commandtools.Definitions()...)
-	definitions = append(definitions, sessiontools.Definitions()...)
 	return core.BuildDefinitions(core.Runtime{
 		Mode:    mode,
 		Service: service,
 		Options: opts.WithDefaults(),
 	}, definitions)
-}
-
-// SaveSessionMetadata writes a minimal session metadata file.
-// SaveSessionMetadata 写入最小会话元数据文件。
-func SaveSessionMetadata(secCtx security.Context) error {
-	return sessiontools.SaveMetadata(secCtx)
-}
-
-// LoadLatestSessionMetadata reads the newest persisted session metadata.
-// LoadLatestSessionMetadata 读取最新持久化会话元数据。
-func LoadLatestSessionMetadata(dataDir string) (*SessionMetadata, error) {
-	return sessiontools.LoadLatestMetadata(dataDir)
 }
 
 // Compile-time service check documents the root facade contract.

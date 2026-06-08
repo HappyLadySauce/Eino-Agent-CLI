@@ -117,27 +117,6 @@ func TestSecureToolSuggestedWriteInPlan(t *testing.T) {
 	}
 }
 
-func TestSaveAndLoadLatestSessionMetadata(t *testing.T) {
-	secCtx := security.Context{
-		SessionID:     "session-1",
-		DataDir:       t.TempDir(),
-		SessionMode:   security.SessionModeAgent,
-		SandboxMode:   security.SandboxModeWorkspaceWrite,
-		ApprovalMode:  security.ApprovalModeInteractive,
-		WorkspaceRoot: t.TempDir(),
-	}
-	if err := SaveSessionMetadata(secCtx); err != nil {
-		t.Fatalf("SaveSessionMetadata() error = %v", err)
-	}
-	metadata, err := LoadLatestSessionMetadata(secCtx.DataDir)
-	if err != nil {
-		t.Fatalf("LoadLatestSessionMetadata() error = %v", err)
-	}
-	if metadata == nil || metadata.SessionID != secCtx.SessionID {
-		t.Fatalf("metadata = %+v, want session %q", metadata, secCtx.SessionID)
-	}
-}
-
 func findInvokableTool(t *testing.T, tools []einotool.BaseTool, name string) einotool.InvokableTool {
 	t.Helper()
 	for _, candidate := range tools {
