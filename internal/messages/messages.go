@@ -7,6 +7,8 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/terminal"
 )
 
 // Message Manager, used to manage conversation history.
@@ -34,6 +36,7 @@ const (
 
 type channelWriter struct {
 	writer  io.Writer
+	style   terminal.Style
 	current outputChannel
 	wrote   bool
 }
@@ -131,7 +134,7 @@ func ConsumeAssistantStream(iter *adk.AsyncIterator[*adk.AgentEvent], writer io.
 	}
 
 	result := &AssistantStreamResult{}
-	out := &channelWriter{writer: writer}
+	out := &channelWriter{writer: writer, style: terminal.StyleForWriter(writer)}
 	var reply strings.Builder
 
 	if iter == nil {
@@ -403,7 +406,7 @@ func (w *channelWriter) ensureChannel(channel outputChannel) error {
 			return err
 		}
 	}
-	if _, err := io.WriteString(w.writer, channelPrefix(channel)); err != nil {
+	if _, err := io.WriteString(w.writer, w.channelPrefix(channel)); err != nil {
 		return err
 	}
 	w.current = channel
@@ -420,13 +423,13 @@ func (w *channelWriter) finish() error {
 	return err
 }
 
-func channelPrefix(channel outputChannel) string {
+func (w *channelWriter) channelPrefix(channel outputChannel) string {
 	switch channel {
 	case outputChannelThinking:
-		return "Assistant[thinking]> "
+		return w.style.Thinking("Assistant[thinking]> ")
 	case outputChannelTools:
-		return "Assistant[tools]> "
+		return w.style.Tools("Assistant[tools]> ")
 	default:
-		return "Assistant> "
+		return w.style.Assistant("Assistant> ")
 	}
 }

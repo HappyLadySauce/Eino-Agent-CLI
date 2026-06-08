@@ -14,6 +14,7 @@ import (
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/terminal"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
 )
 
@@ -85,9 +86,10 @@ func RunAgentLoop(ctx context.Context, cfg *config.Config) error {
 	history := messages.NewMessages()
 	sessionStats := &sessionTokenStats{}
 	prompts := scanPrompts(ctx, os.Stdin)
+	stdoutStyle := terminal.StyleForWriter(os.Stdout)
 
 	for {
-		fmt.Printf("User[%s]> ", modeState.Current())
+		fmt.Print(stdoutStyle.UserPrompt(fmt.Sprintf("User[%s]> ", modeState.Current())))
 		promptResult, ok := receivePrompt(ctx, prompts)
 		if !ok {
 			return nil
@@ -134,7 +136,8 @@ func dispatchCommand(ctx context.Context, runtime *AgentRuntime, modeState *comm
 		if err := modeState.Switch(command.Mode); err != nil {
 			return err
 		}
-		fmt.Printf("Switched to %s mode.\n", modeState.Current())
+		stdoutStyle := terminal.StyleForWriter(os.Stdout)
+		fmt.Print(stdoutStyle.UserPrompt(fmt.Sprintf("Switched to %s mode.\n", modeState.Current())))
 		return nil
 	case commands.AgentCommandSubAgent:
 		// 运行子命令。
@@ -158,7 +161,11 @@ func runChatCommand(ctx context.Context, runtime *AgentRuntime, mode commands.Se
 	}
 
 	runCtx, stats := middlewares.NewStatsContext(ctx)
-	result, err := runtime.RunMain(runCtx, mode, history.Get(), os.Stdout)
+	assistantOut := terminal.NewAnimatedWriter(os.Stdout, "Thinking")
+	result, err := runtime.RunMain(runCtx, mode, history.Get(), assistantOut)
+	if closeErr := assistantOut.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}
@@ -198,7 +205,7 @@ func writeStatsLine(writer io.Writer, stats *middlewares.TokenStats, maxContextT
 	}
 	fmt.Fprintf(
 		writer,
-		"Stats: elapsed=%s prompt↑=%d completion↓=%d turn=%d total=%d context=%.2f%%\n",
+		terminal.StyleForWriter(writer).Stats("Stats: elapsed=%s prompt↑=%d completion↓=%d turn=%d total=%d context=%.2f%%\n"),
 		snapshot.Duration.Round(10_000_000).String(),
 		snapshot.PromptTokens,
 		snapshot.CompletionTokens,
