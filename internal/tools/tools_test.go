@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	einotool "github.com/cloudwego/eino/components/tool"
 
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/approval"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/audit"
@@ -90,34 +93,27 @@ func TestSecureToolSuggestedWriteInPlan(t *testing.T) {
 		SandboxMode:   security.SandboxModeReadOnly,
 		ApprovalMode:  security.ApprovalModeInteractive,
 	}
-	factory := secureToolFactory{
-		mode:    "plan",
-		service: fakeAgentToolService{},
-		opts: SecureToolOptions{
-			Context:     secCtx,
-			Prompter:    &approval.FakePrompter{Decision: approval.DecisionApproveOnce},
-			AuditSink:   audit.NewMemorySink(),
-			RuleSet:     rules.NewSet(),
-			RateLimiter: security.NewRateLimiter(),
-		}.withDefaults(),
-	}
-	result, err := invokeSecureTool(
-		context.Background(),
-		factory,
-		security.ToolDescriptor{Name: "create_file", Provider: security.ToolProviderBuiltin, Kind: security.ToolKindFileWrite, Risk: security.OperationRiskLow},
-		security.OperationRequest{Operation: security.OperationWrite, TargetPath: "x.txt", Risk: security.OperationRiskLow},
-		nil,
-		WriteFileInput{Path: "x.txt", Content: "hello"},
-		func(context.Context, WriteFileInput) (*FileMutationOutput, error) {
-			t.Fatalf("handler should not run for suggested plan write")
-			return nil, nil
-		},
-	)
+	tools, err := NewSecureAgentTools("plan", fakeAgentToolService{}, SecureToolOptions{
+		Context:     secCtx,
+		Prompter:    &approval.FakePrompter{Decision: approval.DecisionApproveOnce},
+		AuditSink:   audit.NewMemorySink(),
+		RuleSet:     rules.NewSet(),
+		RateLimiter: security.NewRateLimiter(),
+	})
 	if err != nil {
-		t.Fatalf("invokeSecureTool() error = %v", err)
+		t.Fatalf("NewSecureAgentTools() error = %v", err)
+	}
+	createFile := findInvokableTool(t, tools, "create_file")
+	raw, err := createFile.InvokableRun(context.Background(), `{"path":"x.txt","content":"hello"}`)
+	if err != nil {
+		t.Fatalf("create_file InvokableRun() error = %v", err)
+	}
+	var result security.ToolResult[json.RawMessage]
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal tool result: %v; raw=%s", err, raw)
 	}
 	if result.Status != security.ResultStatusSuggested {
-		t.Fatalf("status = %q, want suggested", result.Status)
+		t.Fatalf("status = %q, want suggested; raw=%s", result.Status, raw)
 	}
 }
 
@@ -140,6 +136,26 @@ func TestSaveAndLoadLatestSessionMetadata(t *testing.T) {
 	if metadata == nil || metadata.SessionID != secCtx.SessionID {
 		t.Fatalf("metadata = %+v, want session %q", metadata, secCtx.SessionID)
 	}
+}
+
+func findInvokableTool(t *testing.T, tools []einotool.BaseTool, name string) einotool.InvokableTool {
+	t.Helper()
+	for _, candidate := range tools {
+		info, err := candidate.Info(context.Background())
+		if err != nil {
+			t.Fatalf("Info() error = %v", err)
+		}
+		if info.Name != name {
+			continue
+		}
+		invokable, ok := candidate.(einotool.InvokableTool)
+		if !ok {
+			t.Fatalf("tool %q is not invokable", name)
+		}
+		return invokable
+	}
+	t.Fatalf("tool %q not found", name)
+	return nil
 }
 
 func containsAny(text string, values ...string) bool {
