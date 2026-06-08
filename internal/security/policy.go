@@ -120,6 +120,18 @@ func planModeDecision(req OperationRequest, risk OperationRisk) PolicyDecision {
 		}
 		return PolicyDecision{Decision: DecisionSuggest, Reason: "plan mode returns suggestions for mutating operations"}
 	}
+	if req.Tool.Kind == ToolKindAgent {
+		if risk == OperationRiskLow || risk == OperationRiskMedium {
+			return PolicyDecision{Decision: DecisionAllow, Reason: "plan mode allows bounded agent orchestration"}
+		}
+		return PolicyDecision{Decision: DecisionDeny, Reason: "high-risk agent operation is denied in plan mode"}
+	}
+	if req.Tool.Kind == ToolKindMemory {
+		if req.Operation == OperationRead && risk == OperationRiskLow {
+			return PolicyDecision{Decision: DecisionAllow, Reason: "plan mode allows low-risk memory read"}
+		}
+		return PolicyDecision{Decision: DecisionSuggest, Reason: "plan mode returns suggestions for memory writes"}
+	}
 	return PolicyDecision{Decision: DecisionDeny, Reason: "operation is not allowed in plan mode"}
 }
 
@@ -150,6 +162,11 @@ func agentModeDecision(ctx Context, req OperationRequest, risk OperationRisk) Po
 			return PolicyDecision{Decision: DecisionAllow, Reason: "low-risk agent tool is allowed"}
 		}
 		return PolicyDecision{Decision: DecisionAsk, Reason: "agent state mutation requires approval"}
+	case ToolKindMemory:
+		if req.Operation == OperationRead && risk == OperationRiskLow {
+			return PolicyDecision{Decision: DecisionAllow, Reason: "low-risk memory read is allowed"}
+		}
+		return PolicyDecision{Decision: DecisionAsk, Reason: "memory mutation requires approval"}
 	default:
 		return PolicyDecision{Decision: DecisionDeny, Reason: "unsupported tool kind is denied"}
 	}

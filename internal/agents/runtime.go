@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +17,13 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/approval"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/audit"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/commands"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/messages"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/middlewares"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/prompts"
+	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/rules"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/security"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/internal/tools"
 	"github.com/HappyLadySauce/Eino-Agent-CLI/pkg/config"
@@ -35,6 +40,14 @@ type AgentRuntime struct {
 	runners          map[string]*adk.Runner
 	mainRunners      map[commands.SessionMode]*adk.Runner
 	sessionID        string
+	workspaceRoot    string
+	dataDir          string
+	sandboxMode      security.SandboxMode
+	approvalMode     security.ApprovalMode
+	prompter         approval.Prompter
+	auditSink        audit.Sink
+	ruleSet          *rules.Set
+	rateLimiter      *security.RateLimiter
 	maxContextTokens int
 }
 
@@ -46,6 +59,9 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 	}
 	if cfg == nil || cfg.Model == nil {
 		return nil, errors.New("agent config is missing model settings")
+	}
+	if cfg.Security == nil {
+		return nil, errors.New("agent config is missing security settings")
 	}
 
 	modelConfig := &openai.ChatModelConfig{
@@ -80,6 +96,30 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 	if err != nil {
 		return nil, err
 	}
+	workspaceRoot, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	workspaceRoot, err = filepath.Abs(workspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("make workspace root absolute: %w", err)
+	}
+	dataDir, err := filepath.Abs(cfg.Security.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("make data directory absolute: %w", err)
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create data directory: %w", err)
+	}
+	ruleSet, err := rules.LoadFiles(
+		filepath.Join(workspaceRoot, ".eino", "rules.star"),
+		filepath.Join(dataDir, "rules.star"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load rules: %w", err)
+	}
+	auditPath := filepath.Join(dataDir, "audit", sessionID+".jsonl")
+	auditSink := audit.MultiSink{audit.NewMemorySink(), audit.NewFileSink(auditPath)}
 
 	runtime := &AgentRuntime{
 		model:            model,
@@ -88,7 +128,18 @@ func NewAgentRuntime(ctx context.Context, cfg *config.Config) (*AgentRuntime, er
 		runners:          make(map[string]*adk.Runner),
 		mainRunners:      make(map[commands.SessionMode]*adk.Runner),
 		sessionID:        sessionID,
+		workspaceRoot:    workspaceRoot,
+		dataDir:          dataDir,
+		sandboxMode:      security.SandboxMode(cfg.Security.SandboxMode),
+		approvalMode:     security.ApprovalMode(cfg.Security.ApprovalMode),
+		prompter:         approval.NewCLIPrompter(os.Stdin, os.Stdout),
+		auditSink:        auditSink,
+		ruleSet:          ruleSet,
+		rateLimiter:      security.NewRateLimiter(),
 		maxContextTokens: cfg.Model.MaxContextTokens,
+	}
+	if err := tools.SaveSessionMetadata(runtime.securityContextForMode(commands.SessionModeAgent)); err != nil {
+		return nil, err
 	}
 
 	for _, mode := range []commands.SessionMode{commands.SessionModeAgent, commands.SessionModePlan, commands.SessionModeAsk} {
@@ -310,7 +361,39 @@ func (r *AgentRuntime) newMainRunner(ctx context.Context, mode commands.SessionM
 }
 
 func (r *AgentRuntime) agentToolsForMode(mode commands.SessionMode) ([]tool.BaseTool, error) {
-	return tools.NewAgentTools(string(mode), r)
+	return tools.NewSecureAgentTools(string(mode), r, tools.SecureToolOptions{
+		Context:     r.securityContextForMode(mode),
+		Prompter:    r.prompter,
+		AuditSink:   r.auditSink,
+		RuleSet:     r.ruleSet,
+		RateLimiter: r.rateLimiter,
+	})
+}
+
+func (r *AgentRuntime) securityContextForMode(mode commands.SessionMode) security.Context {
+	secMode := security.SessionMode(mode)
+	sandbox := r.sandboxMode
+	approvalMode := r.approvalMode
+	switch secMode {
+	case security.SessionModeAsk:
+		sandbox = security.SandboxModeReadOnly
+		approvalMode = security.ApprovalModeNever
+	case security.SessionModePlan:
+		if sandbox == security.SandboxModeWorkspaceWrite {
+			sandbox = security.SandboxModeReadOnly
+		}
+		if approvalMode == security.ApprovalModeAuto {
+			approvalMode = security.ApprovalModeInteractive
+		}
+	}
+	return security.Context{
+		SessionID:     r.sessionID,
+		WorkspaceRoot: r.workspaceRoot,
+		DataDir:       r.dataDir,
+		SessionMode:   secMode,
+		SandboxMode:   sandbox,
+		ApprovalMode:  approvalMode,
+	}
 }
 
 func newChatModelAgent(ctx context.Context, model *openai.ChatModel, definition AgentDefinition, tools []tool.BaseTool, handlers []adk.ChatModelAgentMiddleware) (*adk.ChatModelAgent, error) {

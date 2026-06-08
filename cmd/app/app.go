@@ -62,7 +62,8 @@ func NewAPICommand(ctx context.Context, basename string) *cobra.Command {
 
 func run(ctx context.Context, opts *options.Options) error {
 	cfg := &config.Config{
-		Model: opts.Model,
+		Model:    opts.Model,
+		Security: opts.Security,
 	}
 	config.Init(cfg)
 
